@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Env
+.env
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+
+# Docker
+docker-compose.override.yml
