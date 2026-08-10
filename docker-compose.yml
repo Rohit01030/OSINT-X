@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: osintx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-osintx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osintx}
+      POSTGRES_DB: ${POSTGRES_DB:-osintx}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-osintx}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: osintx-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    container_name: osintx-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+# NOTE for future steps:
+#   - `frontend` service added in Step 3
+#   - `ollama` service added in Step 20
+#   - `celery-worker` service added in Step 9 (background jobs)
+#   - `nginx` service added in Step 28
+
+volumes:
+  postgres_data:
