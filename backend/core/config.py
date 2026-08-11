@@ -5,6 +5,7 @@ All settings are read from environment variables (see .env.example at the
 project root). Nothing here should ever be hardcoded with a real secret —
 defaults exist only so the app can boot in local dev without a .env file.
 """
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,7 +33,14 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://ollama:11434"
     OLLAMA_MODEL: str = "llama3:8b"
 
+    # Threat Intelligence APIs
+    HIBP_API_KEY: Optional[str] = None
+    VIRUSTOTAL_API_KEY: Optional[str] = None
+    ABUSEIPDB_API_KEY: Optional[str] = None
+    SHODAN_API_KEY: Optional[str] = None
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
 
 
 settings = Settings()

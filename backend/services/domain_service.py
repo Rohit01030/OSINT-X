@@ -4,6 +4,7 @@ Performs WHOIS/RDAP lookups, DNS resolution, SSL/TLS certificate auditing,
 HTTP security headers evaluation, technology stack detection, and passive subdomain enumeration.
 Stores scan findings into the PostgreSQL/SQLite findings table.
 """
+import uuid
 import socket
 import ssl
 import logging
@@ -351,8 +352,11 @@ def analyze_domain(db: Session, investigation_id: str, raw_target: str) -> Dict[
     http_data = get_http_headers_and_tech(clean_domain)
     subdomains_data = get_subdomains(clean_domain)
 
+    finding_id = str(uuid.uuid4())
+
     # 2. Build Finding Data Payload
     scan_result = {
+        "finding_id": finding_id,
         "target": clean_domain,
         "scanned_at": datetime.now(timezone.utc).isoformat(),
         "whois": whois_data,
@@ -371,6 +375,7 @@ def analyze_domain(db: Session, investigation_id: str, raw_target: str) -> Dict[
 
     # 3. Store Finding in DB
     finding = Finding(
+        id=finding_id,
         investigation_id=investigation_id,
         module="domain",
         type="domain_scan",
@@ -391,5 +396,4 @@ def analyze_domain(db: Session, investigation_id: str, raw_target: str) -> Dict[
     db.commit()
     db.refresh(finding)
 
-    scan_result["finding_id"] = finding.id
     return scan_result

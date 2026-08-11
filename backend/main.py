@@ -1,8 +1,9 @@
 """
 OSINT-X backend entrypoint.
 
-Phase 3 scope: core app wiring, CORS, rate limiting, health router,
-database table creation, authentication, and investigation case management endpoints.
+Phase 5 scope: core app wiring, CORS, rate limiting, health router,
+database table creation, authentication, case management, domain intelligence,
+and IP intelligence endpoints.
 """
 import logging
 
@@ -21,6 +22,11 @@ from api.health import router as health_router
 from api.auth import router as auth_router
 from api.investigations import router as investigations_router
 from api.domain import router as domain_router
+from api.ip import router as ip_router
+from api.email import router as email_router
+from api.username import router as username_router
+from api.file_intel import router as file_intel_router
+from api.threat_intel import router as threat_intel_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -44,6 +50,13 @@ app.include_router(health_router)
 app.include_router(auth_router, prefix="/api")
 app.include_router(investigations_router, prefix="/api")
 app.include_router(domain_router, prefix="/api")
+app.include_router(ip_router, prefix="/api")
+app.include_router(email_router, prefix="/api")
+app.include_router(username_router, prefix="/api")
+app.include_router(file_intel_router, prefix="/api")
+app.include_router(threat_intel_router, prefix="/api")
+
+
 
 
 @app.on_event("startup")
