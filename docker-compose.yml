@@ -32,6 +32,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - DATABASE_URL=postgresql://osintx:osintx@postgres:5432/osintx
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
     ports:
       - "8000:8000"
     volumes:
@@ -42,11 +46,45 @@ services:
       redis:
         condition: service_started
 
-# NOTE for future steps:
-#   - `frontend` service added in Step 3
-#   - `ollama` service added in Step 20
-#   - `celery-worker` service added in Step 9 (background jobs)
-#   - `nginx` service added in Step 28
+  frontend:
+    build: ./frontend
+    container_name: osintx-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: osintx-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  celery-worker:
+    build: ./backend
+    container_name: osintx-celery-worker
+    restart: unless-stopped
+    command: celery -A core.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    container_name: osintx-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
 
 volumes:
   postgres_data:
+  ollama_data:

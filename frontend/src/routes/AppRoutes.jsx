@@ -5,6 +5,10 @@ import Landing from "../pages/Landing.jsx";
 import Login from "../pages/Login.jsx";
 import Register from "../pages/Register.jsx";
 import Dashboard from "../pages/Dashboard.jsx";
+import AiAssistantPage from "../pages/AiAssistantPage.jsx";
+import VisualizationPage from "../pages/VisualizationPage.jsx";
+import ReportsPage from "../pages/ReportsPage.jsx";
+import AuditLogsPage from "../pages/AuditLogsPage.jsx";
 import NotFound from "../pages/NotFound.jsx";
 
 function ProtectedRoute({ children }) {
@@ -38,6 +42,38 @@ export default function AppRoutes() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-assistant"
+        element={
+          <ProtectedRoute>
+            <AiAssistantPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/visualization"
+        element={
+          <ProtectedRoute>
+            <VisualizationPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <ReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/audit-logs"
+        element={
+          <ProtectedRoute>
+            <AuditLogsPage />
           </ProtectedRoute>
         }
       />

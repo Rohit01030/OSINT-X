@@ -32,6 +32,51 @@ export default function MainLayout({ children }) {
               Dashboard
             </Link>
 
+            <Link
+              to="/ai-assistant"
+              className={
+                location.pathname === "/ai-assistant"
+                  ? "text-signal font-mono font-medium text-sm flex items-center gap-1.5"
+                  : "text-ink-muted hover:text-ink font-mono text-sm transition-colors flex items-center gap-1.5"
+              }
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-signal inline-block" />
+              AI Assistant
+            </Link>
+
+            <Link
+              to="/visualization"
+              className={
+                location.pathname === "/visualization"
+                  ? "text-signal font-mono font-medium text-sm flex items-center gap-1.5"
+                  : "text-ink-muted hover:text-ink font-mono text-sm transition-colors flex items-center gap-1.5"
+              }
+            >
+              Visualization
+            </Link>
+
+            <Link
+              to="/reports"
+              className={
+                location.pathname === "/reports"
+                  ? "text-signal font-mono font-medium text-sm flex items-center gap-1.5"
+                  : "text-ink-muted hover:text-ink font-mono text-sm transition-colors flex items-center gap-1.5"
+              }
+            >
+              Reports
+            </Link>
+
+            <Link
+              to="/audit-logs"
+              className={
+                location.pathname === "/audit-logs"
+                  ? "text-signal font-mono font-medium text-sm flex items-center gap-1.5"
+                  : "text-ink-muted hover:text-ink font-mono text-sm transition-colors flex items-center gap-1.5"
+              }
+            >
+              Audit Logs
+            </Link>
+
             {user ? (
               <div className="flex items-center gap-4 border-l border-base-border pl-6">
                 <span className="text-xs font-mono text-ink-muted hidden sm:inline">

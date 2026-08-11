@@ -27,11 +27,19 @@ from api.email import router as email_router
 from api.username import router as username_router
 from api.file_intel import router as file_intel_router
 from api.threat_intel import router as threat_intel_router
+from api.ai_engine import router as ai_engine_router
+from api.visualization import router as visualization_router
+from api.reports import router as reports_router
+from api.audit import router as audit_router
+from middleware.security_headers import SecurityHeadersMiddleware
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0")
+
+# Attach security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Attach rate limiter
 app.state.limiter = limiter
@@ -55,6 +63,10 @@ app.include_router(email_router, prefix="/api")
 app.include_router(username_router, prefix="/api")
 app.include_router(file_intel_router, prefix="/api")
 app.include_router(threat_intel_router, prefix="/api")
+app.include_router(ai_engine_router, prefix="/api")
+app.include_router(visualization_router, prefix="/api")
+app.include_router(reports_router, prefix="/api")
+app.include_router(audit_router, prefix="/api")
 
 
 

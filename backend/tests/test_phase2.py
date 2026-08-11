@@ -56,13 +56,20 @@ def test_jwt_token_creation_and_decoding():
 
 
 def test_auth_api_workflow():
+    app.dependency_overrides[get_db] = override_get_db
+    local_client = TestClient(app)
+
+    # Reset in-memory SQLite tables to ensure test isolation
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
     # 1. Register first user (gets admin role)
     register_payload = {
         "username": "testadmin",
         "email": "admin@example.com",
         "password": "SecurePassword123!",
     }
-    response = client.post("/api/auth/register", json=register_payload)
+    response = local_client.post("/api/auth/register", json=register_payload)
     assert response.status_code == 201
     data = response.json()
     assert data["username"] == "testadmin"
@@ -74,7 +81,7 @@ def test_auth_api_workflow():
         "username_or_email": "testadmin",
         "password": "SecurePassword123!",
     }
-    login_resp = client.post("/api/auth/login", json=login_payload)
+    login_resp = local_client.post("/api/auth/login", json=login_payload)
     assert login_resp.status_code == 200
     token_data = login_resp.json()
     assert "access_token" in token_data
@@ -82,7 +89,7 @@ def test_auth_api_workflow():
 
     # 3. Access protected /api/auth/me endpoint
     headers = {"Authorization": f"Bearer {token}"}
-    me_resp = client.get("/api/auth/me", headers=headers)
+    me_resp = local_client.get("/api/auth/me", headers=headers)
     assert me_resp.status_code == 200
     me_data = me_resp.json()
     assert me_data["username"] == "testadmin"
