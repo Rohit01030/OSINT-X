@@ -20,6 +20,7 @@ import models  # loads all model definitions
 from api.health import router as health_router
 from api.auth import router as auth_router
 from api.investigations import router as investigations_router
+from api.domain import router as domain_router
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router, prefix="/api")
 app.include_router(investigations_router, prefix="/api")
+app.include_router(domain_router, prefix="/api")
 
 
 @app.on_event("startup")

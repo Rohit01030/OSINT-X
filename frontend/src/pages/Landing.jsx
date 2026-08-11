@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+
 const CAPABILITIES = [
   { label: "Domain", detail: "WHOIS, DNS, SSL, subdomains" },
   { label: "IP", detail: "GeoIP, ASN, reputation, blacklists" },
@@ -24,18 +26,18 @@ export default function Landing() {
         </p>
 
         <div className="mt-10 flex items-center gap-4">
-          
-            href="/register"
+          <Link
+            to="/register"
             className="px-5 py-3 bg-signal text-base-bg font-medium rounded-md hover:bg-signal-dim transition-colors"
           >
             Start an investigation
-          </a>
-          
-            href="/login"
+          </Link>
+          <Link
+            to="/login"
             className="px-5 py-3 border border-base-border text-ink font-medium rounded-md hover:border-signal transition-colors"
           >
             Sign in
-          </a>
+          </Link>
         </div>
       </section>
 

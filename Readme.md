@@ -1,5 +1,5 @@
-# OSINT-X — Project Structure (v2)
-
+# OSINT-X — Project Structure (v2) 
+ 
 An OSINT (Open-Source Intelligence) investigation platform — domain, IP,
 email, username, and file intelligence, threat-intel integrations, and a
 local AI assistant (Ollama-based, no API key required) — built full-stack
