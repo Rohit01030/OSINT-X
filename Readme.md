@@ -4,7 +4,7 @@ An OSINT (Open-Source Intelligence) investigation platform — domain, IP,
 email, username, and file intelligence, threat-intel integrations, and a
 local AI assistant (Ollama-based, no API key required) — built full-stack
 with React, FastAPI, and PostgreSQL.
-
+ 
 > **Build status:** Step 1 of 30 complete — backend skeleton, config,
 > logging, and health check are working. See the build roadmap for what's
 > next.
