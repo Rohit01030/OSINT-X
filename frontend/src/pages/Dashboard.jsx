@@ -8,6 +8,11 @@ import {
   deleteInvestigation,
 } from "../services/api";
 import DomainIntelModule from "../components/DomainIntelModule";
+import IpIntelModule from "../components/IpIntelModule";
+import EmailIntelModule from "../components/EmailIntelModule";
+import UsernameIntelModule from "../components/UsernameIntelModule";
+import FileIntelModule from "../components/FileIntelModule";
+import ThreatIntelModule from "../components/ThreatIntelModule";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -442,32 +447,68 @@ export default function Dashboard() {
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex items-center gap-2 border-b border-base-border">
-              <button
-                onClick={() => setCaseModalTab("domain_scan")}
-                className={`px-4 py-2 text-xs font-mono font-bold rounded-t-md transition-colors ${
-                  caseModalTab === "domain_scan"
-                    ? "bg-signal text-base-bg"
-                    : "text-ink-muted hover:text-ink bg-base-bg"
-                }`}
-              >
-                🌐 Domain Intelligence Scanner
-              </button>
-              <button
-                onClick={() => setCaseModalTab("settings")}
-                className={`px-4 py-2 text-xs font-mono font-bold rounded-t-md transition-colors ${
-                  caseModalTab === "settings"
-                    ? "bg-signal text-base-bg"
-                    : "text-ink-muted hover:text-ink bg-base-bg"
-                }`}
-              >
-                ⚙️ Case Settings & Metadata
-              </button>
+            <div className="flex items-center gap-1 border-b border-base-border overflow-x-auto pb-1">
+              {[
+                { id: "domain_scan", label: "🌐 Domain" },
+                { id: "ip_scan", label: "🖥️ IP Intel" },
+                { id: "email_scan", label: "✉️ Email" },
+                { id: "username_scan", label: "👤 Username" },
+                { id: "file_scan", label: "📁 File Forensics" },
+                { id: "threat_scan", label: "🛡️ Threat Intel" },
+                { id: "settings", label: "⚙️ Settings" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setCaseModalTab(tab.id)}
+                  className={`px-3 py-2 text-xs font-mono font-bold rounded-t-md whitespace-nowrap transition-colors ${
+                    caseModalTab === tab.id
+                      ? "bg-signal text-base-bg"
+                      : "text-ink-muted hover:text-ink bg-base-bg"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
-            {/* TAB CONTENT 1: DOMAIN INTELLIGENCE MODULE */}
+            {/* TAB CONTENTS */}
             {caseModalTab === "domain_scan" && (
               <DomainIntelModule
+                investigationId={selectedCase.id}
+                onScanComplete={() => fetchData()}
+              />
+            )}
+
+            {caseModalTab === "ip_scan" && (
+              <IpIntelModule
+                investigationId={selectedCase.id}
+                onScanComplete={() => fetchData()}
+              />
+            )}
+
+            {caseModalTab === "email_scan" && (
+              <EmailIntelModule
+                investigationId={selectedCase.id}
+                onScanComplete={() => fetchData()}
+              />
+            )}
+
+            {caseModalTab === "username_scan" && (
+              <UsernameIntelModule
+                investigationId={selectedCase.id}
+                onScanComplete={() => fetchData()}
+              />
+            )}
+
+            {caseModalTab === "file_scan" && (
+              <FileIntelModule
+                investigationId={selectedCase.id}
+                onScanComplete={() => fetchData()}
+              />
+            )}
+
+            {caseModalTab === "threat_scan" && (
+              <ThreatIntelModule
                 investigationId={selectedCase.id}
                 onScanComplete={() => fetchData()}
               />

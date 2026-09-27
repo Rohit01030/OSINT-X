@@ -102,4 +102,65 @@ export async function getDomainSubdomains(domain) {
   return response.data;
 }
 
+// IP Intelligence Endpoints
+export async function analyzeIp(investigationId, target, consentConfirmed = false) {
+  const response = await api.post("/api/ip/analyze", {
+    investigation_id: investigationId,
+    target,
+    consent_confirmed: consentConfirmed,
+  });
+  return response.data;
+}
+
+export async function scanIpPorts(investigationId, target, consentConfirmed = true, customPorts = null) {
+  const response = await api.post("/api/ip/scan-ports", {
+    investigation_id: investigationId,
+    target,
+    consent_confirmed: consentConfirmed,
+    custom_ports: customPorts,
+  });
+  return response.data;
+}
+
+// Email Intelligence Endpoints
+export async function analyzeEmail(investigationId, target) {
+  const response = await api.post("/api/email/analyze", {
+    investigation_id: investigationId,
+    target,
+  });
+  return response.data;
+}
+
+// Username Intelligence Endpoints
+export async function analyzeUsername(investigationId, target) {
+  const response = await api.post("/api/username/analyze", {
+    investigation_id: investigationId,
+    target,
+  });
+  return response.data;
+}
+
+// File Intelligence Endpoints
+export async function analyzeFile(investigationId, file) {
+  const formData = new FormData();
+  formData.append("investigation_id", investigationId);
+  formData.append("file", file);
+
+  const response = await api.post("/api/file/analyze", formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return response.data;
+}
+
+// Threat Intelligence Endpoints
+export async function analyzeThreatIntel(investigationId, target) {
+  const response = await api.post("/api/threat-intel/analyze", {
+    investigation_id: investigationId,
+    target,
+  });
+  return response.data;
+}
+
 export default api;

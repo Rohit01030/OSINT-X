@@ -13,6 +13,7 @@ from models.investigation import Investigation
 from services import domain_service
 from api.deps import get_current_user
 from core.rate_limit import limiter
+from core.cache import cache
 
 router = APIRouter(prefix="/domain", tags=["domain"])
 
@@ -61,21 +62,39 @@ def analyze_domain(
 @limiter.limit("30/minute")
 def get_domain_dns(request: Request, domain: str = Query(..., description="Target domain")):
     """Queries DNS records for a domain."""
-    return domain_service.get_dns_records(domain)
+    cache_key = f"domain:dns:{domain.strip().lower()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = domain_service.get_dns_records(domain)
+    cache.set(cache_key, data, expire_seconds=300)
+    return data
 
 
 @router.get("/whois")
 @limiter.limit("30/minute")
 def get_domain_whois(request: Request, domain: str = Query(..., description="Target domain")):
     """Queries WHOIS/RDAP data for a domain."""
-    return domain_service.get_whois_data(domain)
+    cache_key = f"domain:whois:{domain.strip().lower()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = domain_service.get_whois_data(domain)
+    cache.set(cache_key, data, expire_seconds=600)
+    return data
 
 
 @router.get("/ssl")
 @limiter.limit("30/minute")
 def get_domain_ssl(request: Request, domain: str = Query(..., description="Target domain")):
     """Audits SSL/TLS certificate for a domain."""
-    return domain_service.get_ssl_certificate(domain)
+    cache_key = f"domain:ssl:{domain.strip().lower()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = domain_service.get_ssl_certificate(domain)
+    cache.set(cache_key, data, expire_seconds=300)
+    return data
 
 
 @router.get("/headers")

@@ -14,6 +14,7 @@ from models.investigation import Investigation
 from services import ip_service
 from api.deps import get_current_user
 from core.rate_limit import limiter
+from core.cache import cache
 
 router = APIRouter(prefix="/ip", tags=["ip"])
 
@@ -121,11 +122,23 @@ def scan_ports(
 @limiter.limit("30/minute")
 def get_ip_geoip(request: Request, ip: str = Query(..., description="Target IP address")):
     """Performs GeoIP and ASN/ISP lookup for target IP."""
-    return ip_service.get_geoip_data(ip)
+    cache_key = f"ip:geoip:{ip.strip()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = ip_service.get_geoip_data(ip)
+    cache.set(cache_key, data, expire_seconds=600)
+    return data
 
 
 @router.get("/reputation")
 @limiter.limit("30/minute")
 def get_ip_reputation(request: Request, ip: str = Query(..., description="Target IP address")):
     """Evaluates IP reputation and threat score."""
-    return ip_service.get_ip_reputation(ip)
+    cache_key = f"ip:reputation:{ip.strip()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = ip_service.get_ip_reputation(ip)
+    cache.set(cache_key, data, expire_seconds=300)
+    return data

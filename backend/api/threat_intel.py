@@ -13,6 +13,7 @@ from models.investigation import Investigation
 from services import threat_intel_service
 from api.deps import get_current_user
 from core.rate_limit import limiter
+from core.cache import cache
 
 router = APIRouter(prefix="/threat-intel", tags=["threat_intel"])
 
@@ -70,7 +71,13 @@ def check_virustotal(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid target_type. Must be 'ip', 'domain', or 'hash'.",
         )
-    return threat_intel_service.check_virustotal(target, target_type)
+    cache_key = f"threat:vt:{target_type}:{target.strip().lower()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = threat_intel_service.check_virustotal(target, target_type)
+    cache.set(cache_key, data, expire_seconds=600)
+    return data
 
 
 @router.get("/abuseipdb")
@@ -80,7 +87,13 @@ def check_abuseipdb(
     ip_address: str = Query(..., description="IP address to check")
 ):
     """Directly queries AbuseIPDB score for the IP address."""
-    return threat_intel_service.check_abuseipdb(ip_address)
+    cache_key = f"threat:abuseipdb:{ip_address.strip()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = threat_intel_service.check_abuseipdb(ip_address)
+    cache.set(cache_key, data, expire_seconds=600)
+    return data
 
 
 @router.get("/shodan")
@@ -90,4 +103,10 @@ def check_shodan(
     ip_address: str = Query(..., description="IP address to check")
 ):
     """Directly queries Shodan details for the IP address."""
-    return threat_intel_service.check_shodan(ip_address)
+    cache_key = f"threat:shodan:{ip_address.strip()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    data = threat_intel_service.check_shodan(ip_address)
+    cache.set(cache_key, data, expire_seconds=600)
+    return data
