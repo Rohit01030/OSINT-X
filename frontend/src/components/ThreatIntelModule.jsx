@@ -41,10 +41,17 @@ export default function ThreatIntelModule({ investigationId, onScanComplete }) {
         return "bg-risk-medium/20 text-risk-medium border-risk-medium/40";
       case "high":
       case "critical":
+      case "malicious":
         return "bg-risk-critical/20 text-risk-critical border-risk-critical/40";
       default:
         return "bg-base-border text-ink-muted border-base-border";
     }
+  };
+
+  const getScoreColor = (score) => {
+    if (score >= 80) return "text-emerald-400";
+    if (score >= 50) return "text-risk-medium";
+    return "text-risk-critical";
   };
 
   const vt = scanResult?.virustotal || {};
@@ -127,9 +134,9 @@ export default function ThreatIntelModule({ investigationId, onScanComplete }) {
             <div className="bg-base-bg border border-base-border rounded-md p-3">
               <span className="text-[10px] font-mono text-ink-muted block uppercase">Abuse Confidence</span>
               <span className={`font-mono text-sm font-bold ${
-                (abuse.abuse_confidence_score || 0) > 20 ? "text-risk-critical" : "text-ink"
+                (abuse.abuse_confidence_score ?? abuse.data?.abuseConfidenceScore ?? 0) > 20 ? "text-risk-critical" : "text-ink"
               }`}>
-                {abuse.abuse_confidence_score ?? 0}%
+                {abuse.abuse_confidence_score ?? abuse.data?.abuseConfidenceScore ?? 0}%
               </span>
             </div>
           </div>
@@ -160,7 +167,9 @@ export default function ThreatIntelModule({ investigationId, onScanComplete }) {
               </div>
               <div className="flex justify-between py-1 border-b border-base-border/50">
                 <span className="text-ink-muted">Unified Safety Score:</span>
-                <span className="text-signal font-bold">{scanResult.unified_score ?? 100} / 100</span>
+                <span className={`font-bold ${getScoreColor(scanResult.unified_score ?? 100)}`}>
+                  {scanResult.unified_score ?? 100} / 100
+                </span>
               </div>
               <div className="flex justify-between py-1 border-b border-base-border/50">
                 <span className="text-ink-muted">Shodan Open Ports Discovered:</span>

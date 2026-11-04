@@ -205,24 +205,48 @@ def analyze_threat_intel(db: Session, investigation_id: str, raw_target: str) ->
     elif target_type == "hash":
         vt_data = check_virustotal(clean_target, "hash")
 
-    # 3. Compute Deterministic Reputation Score (0.0 to 10.0)
-    score = 0.0
-    
-    # VirusTotal score contribution: malicious detection count
-    if vt_data and "data" in vt_data and "attributes" in vt_data["data"]:
-        stats = vt_data["data"]["attributes"].get("last_analysis_stats", {})
-        malicious = stats.get("malicious", 0)
-        if malicious > 0:
-            # Scale up to 10.0: e.g. 5+ engine detections makes it 10.0
-            score = max(score, min(10.0, malicious * 2.0))
+    # 3. Compute Deterministic Threat Level & Unified Safety Score
+    vt_malicious = 0
+    vt_suspicious = 0
+    if vt_data and isinstance(vt_data, dict) and "data" in vt_data:
+        attrs = vt_data["data"].get("attributes") or {}
+        stats = attrs.get("last_analysis_stats") or {}
+        vt_malicious = stats.get("malicious", 0)
+        vt_suspicious = stats.get("suspicious", 0)
 
-    # AbuseIPDB score contribution: abuse confidence score
-    if abuse_data and "data" in abuse_data:
-        confidence = abuse_data["data"].get("abuseConfidenceScore", 0)
-        score = max(score, (confidence / 100.0) * 10.0)
+    abuse_confidence = 0
+    total_reports = 0
+    country_code = "N/A"
+    is_whitelisted = False
+    if abuse_data and isinstance(abuse_data, dict) and "data" in abuse_data:
+        ab_data = abuse_data["data"] or {}
+        abuse_confidence = ab_data.get("abuseConfidenceScore", 0)
+        total_reports = ab_data.get("totalReports", 0)
+        country_code = ab_data.get("countryCode", "N/A")
+        is_whitelisted = ab_data.get("isWhitelisted", False)
+        # Helper keys for direct frontend access
+        abuse_data["abuse_confidence_score"] = abuse_confidence
+        abuse_data["total_reports"] = total_reports
+        abuse_data["country_code"] = country_code
+        abuse_data["is_whitelisted"] = is_whitelisted
 
-    # Round reputation score to 1 decimal place
-    reputation_score = round(score, 1)
+    # Dynamic multi-feed safety calculation (100 = clean safe, 0 = critical malware)
+    total_malicious_weight = (vt_malicious * 15) + (vt_suspicious * 5) + (abuse_confidence * 0.8)
+
+    if vt_malicious >= 5 or abuse_confidence >= 75 or total_malicious_weight >= 60:
+        threat_level = "Critical" if (vt_malicious >= 10 or abuse_confidence >= 90) else "Malicious"
+        unified_score = max(0, int(100 - total_malicious_weight))
+    elif vt_malicious >= 2 or abuse_confidence >= 25 or total_malicious_weight >= 25:
+        threat_level = "Suspicious"
+        unified_score = max(20, int(100 - total_malicious_weight))
+    elif vt_malicious >= 1 or abuse_confidence > 0 or total_malicious_weight > 0:
+        threat_level = "Low"
+        unified_score = max(50, int(100 - total_malicious_weight))
+    else:
+        threat_level = "Clean"
+        unified_score = 100
+
+    reputation_score = round(min(10.0, (100 - unified_score) / 10.0), 1)
 
     finding_id = str(uuid.uuid4())
 
@@ -235,6 +259,8 @@ def analyze_threat_intel(db: Session, investigation_id: str, raw_target: str) ->
         "virustotal": vt_data,
         "abuseipdb": abuse_data,
         "shodan": shodan_data,
+        "threat_level": threat_level,
+        "unified_score": unified_score,
         "reputation_score": reputation_score,
         "simulation_mode": {
             "virustotal": settings.VIRUSTOTAL_API_KEY is None,
@@ -242,8 +268,11 @@ def analyze_threat_intel(db: Session, investigation_id: str, raw_target: str) ->
             "shodan": settings.SHODAN_API_KEY is None,
         },
         "summary": {
-            "vt_malicious_count": vt_data["data"]["attributes"]["last_analysis_stats"].get("malicious", 0) if (vt_data and "data" in vt_data) else 0,
-            "abuse_confidence": abuse_data["data"].get("abuseConfidenceScore", 0) if (abuse_data and "data" in abuse_data) else 0,
+            "vt_malicious_count": vt_malicious,
+            "vt_suspicious_count": vt_suspicious,
+            "abuse_confidence": abuse_confidence,
+            "threat_level": threat_level,
+            "unified_score": unified_score,
             "shodan_ports": shodan_data.get("ports", []) if shodan_data else [],
         }
     }
