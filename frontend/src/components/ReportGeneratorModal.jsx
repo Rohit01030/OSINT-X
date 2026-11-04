@@ -2,9 +2,10 @@ import { useState } from "react";
 import { generateReport } from "../services/reportService";
 
 export default function ReportGeneratorModal({ isOpen, onClose, investigationId, caseTitle }) {
-  const [format, setFormat] = useState("json");
+  const [format, setFormat] = useState("pdf");
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
+  const [viewUrl, setViewUrl] = useState(null);
   const [error, setError] = useState(null);
 
   if (!isOpen) return null;
@@ -13,28 +14,36 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
+    setViewUrl(null);
 
     try {
+      const safeTitle = caseTitle ? caseTitle.replace(/\s+/g, "_") : "Case";
+
       if (format === "csv") {
-        // Blob file download for CSV
         const blobData = await generateReport(investigationId, "csv");
         const url = window.URL.createObjectURL(new Blob([blobData]));
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `OSINT-X_Report_${caseTitle ? caseTitle.replace(/\s+/g, "_") : "Case"}.csv`);
+        link.setAttribute("download", `OSINT-X_Report_${safeTitle}.csv`);
         document.body.appendChild(link);
         link.click();
         link.remove();
         setSuccessMsg("CSV report generated & downloaded successfully!");
       } else if (format === "pdf") {
-        // PDF HTML Executive Briefing popup window
+        // Direct download of the Executive Report file
         const resData = await generateReport(investigationId, "pdf");
-        const printWin = window.open("", "_blank");
-        if (printWin) {
-          printWin.document.write(resData);
-          printWin.document.close();
-        }
-        setSuccessMsg("Executive PDF/HTML Intelligence Briefing opened in new browser window!");
+        const blob = new Blob([resData], { type: "text/html;charset=utf-8" });
+        const url = window.URL.createObjectURL(blob);
+        setViewUrl(url);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `OSINT-X_Executive_Report_${safeTitle}.html`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setSuccessMsg("Executive Report downloaded successfully! (You can also open it below)");
       } else {
         // JSON Export file download
         const resData = await generateReport(investigationId, "json");
@@ -43,14 +52,15 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.setAttribute("download", `OSINT-X_Report_${caseTitle ? caseTitle.replace(/\s+/g, "_") : "Case"}.json`);
+        link.setAttribute("download", `OSINT-X_Report_${safeTitle}.json`);
         document.body.appendChild(link);
         link.click();
         link.remove();
         setSuccessMsg("JSON intelligence report downloaded successfully!");
       }
     } catch (err) {
-      setError(err.response?.data?.detail || "Failed to generate report.");
+      console.error("Report generation error:", err);
+      setError(err.response?.data?.detail || err.message || "Failed to generate report.");
     } finally {
       setLoading(false);
     }
@@ -122,8 +132,20 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
         )}
 
         {successMsg && (
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-xs">
-            {successMsg}
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded text-xs space-y-2">
+            <div>✓ {successMsg}</div>
+            {viewUrl && (
+              <div>
+                <a
+                  href={viewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-signal font-bold underline hover:text-signal-dim"
+                >
+                  View / Print Executive Report ↗
+                </a>
+              </div>
+            )}
           </div>
         )}
 

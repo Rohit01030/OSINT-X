@@ -142,14 +142,19 @@ def calculate_and_explain_risk(db: Session, investigation_id: str) -> Dict[str, 
         data = f.data or {}
         # Threat intel findings
         if f.module == "threat_intel":
-            vt = data.get("virustotal", {}).get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-            malicious = vt.get("malicious", 0)
+            vt_obj = data.get("virustotal") or {}
+            vt_data = vt_obj.get("data") if isinstance(vt_obj, dict) else {}
+            vt_attrs = vt_data.get("attributes") if isinstance(vt_data, dict) else {}
+            vt_stats = vt_attrs.get("last_analysis_stats") if isinstance(vt_attrs, dict) else {}
+            malicious = vt_stats.get("malicious", 0) if isinstance(vt_stats, dict) else 0
             if malicious > 0:
                 inc = min(4.0, malicious * 0.5)
                 score += inc
                 factors.append(f"VirusTotal detected {malicious} malicious engines (+{inc:.1f})")
-            
-            abuse_score = data.get("abuseipdb", {}).get("data", {}).get("abuseConfidenceScore", 0)
+
+            abuse_obj = data.get("abuseipdb") or {}
+            abuse_data = abuse_obj.get("data") if isinstance(abuse_obj, dict) else {}
+            abuse_score = abuse_data.get("abuseConfidenceScore", 0) if isinstance(abuse_data, dict) else 0
             if abuse_score > 20:
                 inc = min(3.0, (abuse_score / 100.0) * 3.0)
                 score += inc

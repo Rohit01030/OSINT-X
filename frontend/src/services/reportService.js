@@ -1,12 +1,23 @@
 import api from "./api";
 
 export async function generateReport(investigationId, format = "json") {
-  const response = await api.post("/api/reports/generate", {
-    investigation_id: investigationId,
-    format,
-  }, {
-    responseType: format === "csv" ? "blob" : "json"
-  });
+  const responseType =
+    format === "csv"
+      ? "blob"
+      : format === "pdf" || format === "html"
+      ? "text"
+      : "json";
+
+  const response = await api.post(
+    "/api/reports/generate",
+    {
+      investigation_id: investigationId,
+      format,
+    },
+    {
+      responseType,
+    }
+  );
   return response.data;
 }
 

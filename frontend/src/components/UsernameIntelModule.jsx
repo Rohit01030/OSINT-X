@@ -31,7 +31,7 @@ export default function UsernameIntelModule({ investigationId, onScanComplete })
     }
   };
 
-  const results = scanResult?.results || [];
+  const results = scanResult?.results || scanResult?.profiles || [];
   const displayedResults = filterFoundOnly ? results.filter((r) => r.exists) : results;
 
   return (
@@ -89,11 +89,15 @@ export default function UsernameIntelModule({ investigationId, onScanComplete })
             <div className="flex items-center gap-6">
               <div>
                 <span className="text-ink-muted block text-[10px] uppercase">Platforms Queried</span>
-                <span className="text-ink font-bold text-sm">{scanResult.total_checked || 0}</span>
+                <span className="text-ink font-bold text-sm">
+                  {scanResult.summary?.total_checked ?? scanResult.total_checked ?? results.length}
+                </span>
               </div>
               <div>
                 <span className="text-ink-muted block text-[10px] uppercase">Profiles Discovered</span>
-                <span className="text-signal font-bold text-sm">{scanResult.total_found || 0}</span>
+                <span className="text-signal font-bold text-sm">
+                  {scanResult.summary?.total_found ?? scanResult.total_found ?? results.filter((r) => r.exists).length}
+                </span>
               </div>
             </div>
 

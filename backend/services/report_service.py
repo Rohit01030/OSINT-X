@@ -145,7 +145,7 @@ def generate_html_pdf_report(db: Session, investigation_id: str) -> str:
         f"<tr>"
         f"<td style='padding:8px;border:1px solid #374151;'>{f['module'].upper()}</td>"
         f"<td style='padding:8px;border:1px solid #374151;'>{f['type']}</td>"
-        f"<td style='padding:8px;border:1px solid #374151;'>{f.get('data', {}).get('target', 'N/A')}</td>"
+        f"<td style='padding:8px;border:1px solid #374151;'>{(f.get('data') or {}).get('target', 'N/A')}</td>"
         f"<td style='padding:8px;border:1px solid #374151;'>{f['created_at']}</td>"
         f"</tr>"
         for f in findings

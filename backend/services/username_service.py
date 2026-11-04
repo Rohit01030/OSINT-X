@@ -92,6 +92,9 @@ async def analyze_username(db: Session, investigation_id: str, raw_username: str
         "target": clean_username,
         "scanned_at": datetime.now(timezone.utc).isoformat(),
         "profiles": platforms_data,
+        "results": platforms_data,
+        "total_checked": len(platforms_data),
+        "total_found": len(found_platforms),
         "summary": {
             "total_checked": len(platforms_data),
             "total_found": len(found_platforms),

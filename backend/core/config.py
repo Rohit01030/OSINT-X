@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Auth (used starting Step 6, defined now so config is stable going forward)
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 525600
 
     # Redis / Celery
     REDIS_URL: str = "redis://redis:6379/0"
