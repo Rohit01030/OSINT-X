@@ -31,6 +31,7 @@ class OllamaClient:
         """
         Sends generation request to local Ollama instance.
         Falls back to local structured template if service is unreachable.
+        Uses a generous timeout: 5s to connect, 120s to read (model cold-start can be slow).
         """
         payload = {
             "model": self.model,
@@ -40,8 +41,11 @@ class OllamaClient:
         if system_prompt:
             payload["system"] = system_prompt
 
+        # connect=5s (server must respond quickly), read=120s (generation can take time)
+        timeout = httpx.Timeout(connect=5.0, read=120.0, write=10.0, pool=5.0)
+
         try:
-            with httpx.Client(timeout=15.0) as client:
+            with httpx.Client(timeout=timeout) as client:
                 response = client.post(f"{self.base_url}/api/generate", json=payload)
                 if response.status_code == 200:
                     data = response.json()
@@ -51,8 +55,14 @@ class OllamaClient:
                         "response": data.get("response", ""),
                         "offline_fallback": False,
                     }
+                else:
+                    logger.warning("Ollama returned unexpected status %s", response.status_code)
+        except httpx.ConnectError as e:
+            logger.info("Ollama server not reachable (%s). Using fallback.", e)
+        except httpx.ReadTimeout:
+            logger.warning("Ollama generation timed out after 120s. Using fallback.")
         except Exception as e:
-            logger.info("Ollama local service unavailable (%s). Using local rule-based fallback response.", e)
+            logger.info("Ollama error (%s). Using local rule-based fallback response.", e)
 
         # Fallback generator if Ollama is offline
         return {
