@@ -20,18 +20,34 @@ logger = logging.getLogger(__name__)
 
 async def check_site(client: httpx.AsyncClient, platform: str, url: str) -> Dict[str, Any]:
     """
-    Probes a single site URL for the existence of the username.
+    Probes a single site URL for the existence of the username with site-specific anti-false-positive checks.
     """
     try:
-        resp = await client.get(url, follow_redirects=True)
+        resp = await asyncio.wait_for(client.get(url, follow_redirects=True), timeout=4.0)
         if resp.status_code == 200:
             content = resp.text.lower()
             # Double check common false-positive indicator text in HTML response
-            if platform == "Reddit" and ("page not found" in content or "user not found" in content):
+            if platform == "Reddit" and ("page not found" in content or "user not found" in content or "nobody on reddit" in content):
                 return {"platform": platform, "url": url, "exists": False}
-            if platform == "Linktree" and ("page not found" in content or "404" in content):
+            if platform == "Telegram" and ("tgme_page_extra" not in content and "tgme_page_title" not in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "YouTube" and ("this page isn't available" in content or "404 not found" in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "Twitch" and ("content is unavailable" in content or "time machine" in content or "does not exist" in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "Steam" and ("the specified profile could not be found" in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "Linktree" and ("page not found" in content or "404" in content or "looking for" in content):
                 return {"platform": platform, "url": url, "exists": False}
             if platform == "Medium" and ("out of order" in content or "404" in content or "not found" in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "Pinterest" and ("couldn't find that page" in content or "sorry, we couldn't find" in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "TikTok" and ("couldn't find this account" in content or "user not found" in content):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "Instagram" and ("sorry, this page isn't available" in content or resp.url.path.startswith("/accounts/login")):
+                return {"platform": platform, "url": url, "exists": False}
+            if platform == "Twitter / X" and ("this account doesn’t exist" in content or "this account doesn't exist" in content):
                 return {"platform": platform, "url": url, "exists": False}
             return {"platform": platform, "url": url, "exists": True}
         elif resp.status_code == 404:
@@ -45,23 +61,36 @@ async def check_site(client: httpx.AsyncClient, platform: str, url: str) -> Dict
 
 async def check_username_platforms(username: str) -> List[Dict[str, Any]]:
     """
-    Probes popular sites concurrently to check if the username exists.
+    Probes top 15 social media and developer sites concurrently to check if the username exists.
     """
     platforms = {
-        "GitHub": "https://github.com/{username}",
+        # Top Global Social & Media Networks
+        "Twitter / X": "https://x.com/{username}",
+        "Instagram": "https://www.instagram.com/{username}/",
+        "YouTube": "https://www.youtube.com/@{username}",
+        "TikTok": "https://www.tiktok.com/@{username}",
         "Reddit": "https://www.reddit.com/user/{username}",
+        "Telegram": "https://t.me/{username}",
+        "Pinterest": "https://www.pinterest.com/{username}/",
+        "Twitch": "https://www.twitch.tv/{username}",
+        "Spotify": "https://open.spotify.com/user/{username}",
+        "Steam": "https://steamcommunity.com/id/{username}",
+        # Developer & Creator Platforms
+        "GitHub": "https://github.com/{username}",
         "GitLab": "https://gitlab.com/{username}",
-        "Medium": "https://medium.com/@{username}",
         "Dev.to": "https://dev.to/{username}",
+        "Medium": "https://medium.com/@{username}",
         "Linktree": "https://linktr.ee/{username}",
-        "Pinterest": "https://pinterest.com/{username}",
     }
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     }
 
-    async with httpx.AsyncClient(headers=headers, timeout=5.0) as client:
+    timeout = httpx.Timeout(4.0, connect=3.0)
+    async with httpx.AsyncClient(headers=headers, timeout=timeout) as client:
         tasks = []
         for platform, url_template in platforms.items():
             url = url_template.format(username=username)
