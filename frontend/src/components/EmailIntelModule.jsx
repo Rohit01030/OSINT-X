@@ -31,8 +31,16 @@ export default function EmailIntelModule({ investigationId, onScanComplete }) {
     }
   };
 
-  const dnsSec = scanResult?.dns_security || {};
-  const breaches = scanResult?.breaches || {};
+  const dnsSec = scanResult?.dns_security || scanResult?.email_security || {};
+  const rawBreaches = scanResult?.breaches;
+  const breaches = Array.isArray(rawBreaches)
+    ? {
+        total_breaches: rawBreaches.length,
+        breach_names: rawBreaches.map((b) => (typeof b === "string" ? b : b.Name || b.Title || "Unknown")),
+        details: rawBreaches,
+      }
+    : (rawBreaches || {});
+  const domain = scanResult?.domain || scanResult?.email_security?.domain || (scanResult?.target ? scanResult.target.split("@")[1] : "N/A");
 
   return (
     <div className="bg-base-surface border border-base-border rounded-lg p-6 space-y-6">
@@ -84,12 +92,24 @@ export default function EmailIntelModule({ investigationId, onScanComplete }) {
       {/* Results */}
       {scanResult && (
         <div className="space-y-6 pt-2">
+          {scanResult.simulation_mode && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-md flex items-start sm:items-center gap-3 text-xs font-mono text-ink">
+              <span className="text-amber-400 text-base leading-none">ℹ️</span>
+              <div className="flex-1">
+                <span className="font-bold text-amber-400">Breach Simulation Mode Active:</span>{" "}
+                <span className="text-ink-muted">
+                  No <code className="text-amber-300 bg-amber-400/10 px-1 py-0.5 rounded font-bold">HIBP_API_KEY</code> detected in backend environment. Showing offline simulation records (test with <span className="text-ink font-semibold">breached@example.com</span>). Configure an API key in <code className="text-ink-muted bg-base-surface px-1 py-0.5 rounded">backend/.env</code> for live global telemetry.
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Metric Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-base-bg border border-base-border rounded-md p-3">
               <span className="text-[10px] font-mono text-ink-muted block uppercase">Domain</span>
               <span className="font-mono text-sm font-bold text-ink truncate block">
-                {scanResult.domain || "N/A"}
+                {domain}
               </span>
             </div>
             <div className="bg-base-bg border border-base-border rounded-md p-3">
@@ -192,7 +212,7 @@ export default function EmailIntelModule({ investigationId, onScanComplete }) {
                   </span>
                 </div>
                 <div className="p-2 bg-base-surface rounded text-ink-muted break-all">
-                  {dnsSec.dmarc_record || "No DMARC record found at _dmarc." + scanResult.domain}
+                  {dnsSec.dmarc_record || `No DMARC record found at _dmarc.${domain}`}
                 </div>
               </div>
 
@@ -213,21 +233,52 @@ export default function EmailIntelModule({ investigationId, onScanComplete }) {
 
           {/* TAB 3: BREACHES */}
           {activeTab === "breaches" && (
-            <div className="space-y-3 font-mono text-xs">
+            <div className="space-y-4 font-mono text-xs">
+              {scanResult.simulation_mode && (
+                <div className="px-3 py-2 bg-base-surface border border-base-border rounded flex items-center justify-between text-[11px]">
+                  <span className="text-ink-muted">Provider: Have I Been Pwned (HIBP)</span>
+                  <span className="text-amber-400 font-bold">[Simulated Audit]</span>
+                </div>
+              )}
               {(breaches.total_breaches || 0) === 0 ? (
                 <div className="p-6 text-center bg-base-bg border border-base-border rounded-md text-emerald-400">
                   ✓ No public security breaches associated with this identity in monitored repositories.
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <div className="p-3 bg-risk-critical/10 border border-risk-critical/30 rounded text-risk-critical">
-                    ⚠️ This email was found in {breaches.total_breaches} security breach incidents:
+                <div className="space-y-3">
+                  <div className="p-3 bg-risk-critical/10 border border-risk-critical/30 rounded text-risk-critical font-bold">
+                    ⚠️ This email was found in {breaches.total_breaches} security breach incident{(breaches.total_breaches === 1 ? "" : "s")}:
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {(breaches.breach_names || []).map((bName, idx) => (
-                      <div key={idx} className="p-3 bg-base-bg border border-base-border rounded">
-                        <span className="font-bold text-ink block">{bName}</span>
-                        <span className="text-[11px] text-ink-muted">Compromised repository record</span>
+                    {(breaches.details || (breaches.breach_names || []).map((n) => ({ Name: n }))).map((b, idx) => (
+                      <div key={idx} className="p-3 bg-base-bg border border-base-border rounded space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-ink text-sm">{b.Name || b.Title}</span>
+                          {b.BreachDate && (
+                            <span className="text-[10px] text-ink-muted font-mono">{b.BreachDate}</span>
+                          )}
+                        </div>
+                        {b.Description && (
+                          <p
+                            className="text-[11px] text-ink-muted line-clamp-3 leading-relaxed"
+                            dangerouslySetInnerHTML={{ __html: b.Description }}
+                          />
+                        )}
+                        {b.DataClasses && b.DataClasses.length > 0 && (
+                          <div className="pt-1">
+                            <span className="text-[10px] text-ink-muted block mb-1">Exposed Data:</span>
+                            <div className="flex flex-wrap gap-1">
+                              {b.DataClasses.map((dc, i) => (
+                                <span
+                                  key={i}
+                                  className="px-1.5 py-0.5 bg-risk-critical/10 text-risk-critical border border-risk-critical/20 rounded text-[10px]"
+                                >
+                                  {dc}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

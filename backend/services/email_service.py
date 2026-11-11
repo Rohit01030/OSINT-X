@@ -18,6 +18,21 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+DISPOSABLE_DOMAINS = {
+    "mailinator.com", "tempmail.com", "10minutemail.com", "guerrillamail.com",
+    "yopmail.com", "throwawaymail.com", "dispostable.com", "trashmail.com",
+    "sharklasers.com", "temp-mail.org", "fakemailgenerator.com", "getairmail.com",
+    "mohmal.com", "burnermail.io", "crazymailing.com", "mytemp.email",
+    "generator.email", "tempail.com", "emailondeck.com", "guerrillamailblock.com",
+    "inboxkitten.com", "tempinbox.com", "mailnull.com", "trashmail.net",
+    "nada.ltd", "dropmail.me", "getnada.com", "disposablemail.com",
+}
+
+
+def is_disposable_domain(domain: str) -> bool:
+    """Checks whether the domain belongs to a known disposable/burner email provider."""
+    return domain.strip().lower() in DISPOSABLE_DOMAINS
+
 
 def check_email_security(email: str) -> Dict[str, Any]:
     """
@@ -149,16 +164,44 @@ def analyze_email(db: Session, investigation_id: str, raw_email: str) -> Dict[st
     security_data = check_email_security(clean_email)
     breaches_data = check_email_breaches(clean_email)
 
+    domain = security_data.get("domain") or clean_email.split("@")[1].strip().lower()
+    is_disposable = is_disposable_domain(domain)
+    breach_names = [b.get("Name") or b.get("Title") or "Unknown" for b in breaches_data]
+
+    dns_security = {
+        "domain": domain,
+        "has_spf": bool(security_data.get("spf")),
+        "spf_record": security_data.get("spf"),
+        "has_dmarc": bool(security_data.get("dmarc")),
+        "dmarc_record": security_data.get("dmarc"),
+        "has_mx": len(security_data.get("mx", [])) > 0,
+        "mx_records": security_data.get("mx", []),
+        "dkim_records": security_data.get("dkim", []),
+        "warnings": security_data.get("warnings", []),
+    }
+
+    breaches_payload = {
+        "total_breaches": len(breaches_data),
+        "breach_names": breach_names,
+        "details": breaches_data,
+    }
+
     finding_id = str(uuid.uuid4())
 
     scan_result = {
         "finding_id": finding_id,
         "target": clean_email,
+        "domain": domain,
+        "is_valid_format": True,
+        "is_disposable": is_disposable,
         "scanned_at": datetime.now(timezone.utc).isoformat(),
-        "email_security": security_data,
-        "breaches": breaches_data,
+        "dns_security": dns_security,
+        "email_security": security_data,  # Preserved for backward compatibility
+        "breaches": breaches_payload,
         "simulation_mode": settings.HIBP_API_KEY is None,
         "summary": {
+            "domain": domain,
+            "is_disposable": is_disposable,
             "mx_found": len(security_data["mx"]) > 0,
             "spf_valid": security_data["spf"] is not None,
             "dmarc_valid": security_data["dmarc"] is not None,
