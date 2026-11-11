@@ -35,3 +35,12 @@ export async function naturalLanguageSearch(query) {
   const response = await api.post("/api/ai/nl-search", { query });
   return response.data;
 }
+
+export async function aiChat(message, investigationId = null, history = []) {
+  const response = await api.post("/api/ai/chat", {
+    message,
+    investigation_id: investigationId || null,
+    history,
+  });
+  return response.data;
+}
