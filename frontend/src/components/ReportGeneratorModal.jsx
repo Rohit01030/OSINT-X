@@ -3,6 +3,7 @@ import { generateReport } from "../services/reportService";
 
 export default function ReportGeneratorModal({ isOpen, onClose, investigationId, caseTitle }) {
   const [format, setFormat] = useState("pdf");
+  const [classification, setClassification] = useState("TLP:AMBER");
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   const [viewUrl, setViewUrl] = useState(null);
@@ -20,7 +21,7 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
       const safeTitle = caseTitle ? caseTitle.replace(/\s+/g, "_") : "Case";
 
       if (format === "csv") {
-        const blobData = await generateReport(investigationId, "csv");
+        const blobData = await generateReport(investigationId, "csv", classification);
         const url = window.URL.createObjectURL(new Blob([blobData]));
         const link = document.createElement("a");
         link.href = url;
@@ -31,7 +32,7 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
         setSuccessMsg("CSV report generated & downloaded successfully!");
       } else if (format === "pdf") {
         // Direct download of the Executive Report file
-        const resData = await generateReport(investigationId, "pdf");
+        const resData = await generateReport(investigationId, "pdf", classification);
         const blob = new Blob([resData], { type: "text/html;charset=utf-8" });
         const url = window.URL.createObjectURL(blob);
         setViewUrl(url);
@@ -46,7 +47,7 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
         setSuccessMsg("Executive Report downloaded successfully! (You can also open it below)");
       } else {
         // JSON Export file download
-        const resData = await generateReport(investigationId, "json");
+        const resData = await generateReport(investigationId, "json", classification);
         const jsonStr = JSON.stringify(resData.report_data || resData, null, 2);
         const blob = new Blob([jsonStr], { type: "application/json" });
         const url = window.URL.createObjectURL(blob);
@@ -84,6 +85,21 @@ export default function ReportGeneratorModal({ isOpen, onClose, investigationId,
           <div className="p-2.5 bg-base-bg border border-base-border rounded text-ink font-semibold text-xs">
             {caseTitle || "Investigation Case"}
           </div>
+        </div>
+
+        <div>
+          <label className="text-xs text-ink-muted block mb-1">Information Classification:</label>
+          <select
+            value={classification}
+            onChange={(e) => setClassification(e.target.value)}
+            className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-xs font-mono text-ink focus:outline-none focus:border-signal"
+          >
+            <option value="TLP:CLEAR">TLP:CLEAR (Public Disclosure)</option>
+            <option value="TLP:GREEN">TLP:GREEN (Community Shared)</option>
+            <option value="TLP:AMBER">TLP:AMBER (Restricted / Need to Know)</option>
+            <option value="TLP:AMBER+STRICT">TLP:AMBER+STRICT (Organization Only)</option>
+            <option value="TLP:RED">TLP:RED (Named Individuals Only)</option>
+          </select>
         </div>
 
         <div>

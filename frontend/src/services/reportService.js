@@ -1,6 +1,6 @@
 import api from "./api";
 
-export async function generateReport(investigationId, format = "json") {
+export async function generateReport(investigationId, format = "json", classification = "TLP:AMBER") {
   const responseType =
     format === "csv"
       ? "blob"
@@ -13,6 +13,7 @@ export async function generateReport(investigationId, format = "json") {
     {
       investigation_id: investigationId,
       format,
+      classification,
     },
     {
       responseType,

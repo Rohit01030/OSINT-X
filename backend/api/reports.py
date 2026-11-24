@@ -3,6 +3,7 @@ Reports API Router.
 
 Endpoints for generating and retrieving JSON, CSV, and HTML/PDF intelligence reports.
 """
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
@@ -19,7 +20,8 @@ router = APIRouter(prefix="/reports", tags=["Report Generator Module"])
 
 class GenerateReportRequest(BaseModel):
     investigation_id: str
-    format: str = "json"  # 'json', 'csv', 'pdf'
+    format: str = "json"  # 'json', 'csv', 'pdf', 'html'
+    classification: Optional[str] = "TLP:AMBER"
 
 
 @router.post("/generate")
@@ -30,9 +32,15 @@ def generate_report(
 ):
     """Generates intelligence report in requested format (JSON, CSV, PDF/HTML)."""
     fmt = req.format.lower()
+    analyst_name = f"{current_user.username} ({current_user.role})"
 
     if fmt == "json":
-        data = report_service.generate_json_report(db, req.investigation_id)
+        data = report_service.generate_json_report(
+            db,
+            req.investigation_id,
+            classification=req.classification or "TLP:AMBER",
+            analyst_name=analyst_name,
+        )
         if "error" in data:
             raise HTTPException(status_code=404, detail=data["error"])
         report_record = report_service.save_report_record(db, req.investigation_id, "json", "Structured JSON Export")
@@ -50,7 +58,11 @@ def generate_report(
         )
 
     elif fmt in ["pdf", "html"]:
-        html_data = report_service.generate_html_pdf_report(db, req.investigation_id)
+        html_data = report_service.generate_html_pdf_report(
+            db,
+            req.investigation_id,
+            classification=req.classification or "TLP:AMBER",
+        )
         if "Error:" in html_data:
             raise HTTPException(status_code=404, detail="Investigation not found")
         report_record = report_service.save_report_record(db, req.investigation_id, "pdf", "Executive PDF Briefing")

@@ -1,11 +1,13 @@
 """
 Local AI Investigation Engine Service.
 
-Provides AI investigation summarization, deterministic risk scoring with AI explanations,
+Provides evidence-grounded AI investigation summarization, deterministic risk scoring with AI explanations,
 cross-investigation IOC correlation, MITRE ATT&CK technique mapping, and natural language search.
-All security-critical score calculations and mapping rules remain 100% deterministic.
+All security-critical score calculations and mapping rules remain 100% deterministic and evidence-backed.
 """
 import logging
+import html
+import re
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 
@@ -13,269 +15,221 @@ from models.investigation import Investigation
 from models.finding import Finding
 from models.ioc import IOC
 from services.ollama_client import ollama_client
+from services.risk_engine import assess_investigation_risk
+from services.deduplication_service import deduplicate_investigation_findings
+from services.mitre_mapper import map_investigation_mitre
 from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Static deterministic MITRE ATT&CK lookup map for OSINT findings
-MITRE_ATTACK_LOOKUP = {
-    "domain": [
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1590.002",
-            "technique_name": "Gather Victim Network Information: DNS",
-            "description": "Adversaries may gather DNS information to map victim network architecture."
-        },
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1595.002",
-            "technique_name": "Active Scanning: Vulnerability Scanning",
-            "description": "Scanning web servers and security headers for misconfigurations."
-        }
-    ],
-    "ip": [
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1595.001",
-            "technique_name": "Active Scanning: IP Blocks",
-            "description": "Scanning IP ranges to discover active hosts and open services."
-        },
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1590.005",
-            "technique_name": "Gather Victim Network Information: IP Addresses",
-            "description": "Collecting IP addresses and ASN data."
-        }
-    ],
-    "email": [
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1589.002",
-            "technique_name": "Gather Victim Identity Information: Email Addresses",
-            "description": "Gathering email addresses to target in phishing campaigns."
-        },
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1593",
-            "technique_name": "Search Open Technical Databases",
-            "description": "Checking breach databases for compromised credentials."
-        }
-    ],
-    "username": [
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1589.003",
-            "technique_name": "Gather Victim Identity Information: Usernames",
-            "description": "Enumerating online profiles across public social media platforms."
-        }
-    ],
-    "file": [
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1592",
-            "technique_name": "Gather Victim Host Information",
-            "description": "Extracting EXIF metadata and host artifacts from uploaded documents/images."
-        }
-    ],
-    "threat_intel": [
-        {
-            "tactic": "Reconnaissance",
-            "technique_id": "T1596",
-            "technique_name": "Search Open Websites/Domains",
-            "description": "Querying VirusTotal, Shodan, and AbuseIPDB threat intelligence feeds."
-        }
-    ]
-}
+
+def render_markdown_to_html(md: str) -> str:
+    """
+    Renders basic Markdown formatting (headers, bold, italics, inline code, bullet/numbered lists)
+    into safe, styled HTML markup suitable for report viewing and print export.
+    """
+    if not md:
+        return ""
+
+    lines = md.strip().split("\n")
+    out = []
+    in_list = False
+    list_type = "ul"
+
+    for line in lines:
+        s = line.strip()
+        if not s:
+            if in_list:
+                out.append(f"</{list_type}>")
+                in_list = False
+            continue
+
+        # Headers
+        if s.startswith("### "):
+            if in_list:
+                out.append(f"</{list_type}>")
+                in_list = False
+            out.append(f'<h4 style="color:#10B981;margin:12px 0 6px 0;font-size:13px;font-weight:700;">{html.escape(s[4:])}</h4>')
+            continue
+        elif s.startswith("## "):
+            if in_list:
+                out.append(f"</{list_type}>")
+                in_list = False
+            out.append(f'<h3 style="color:#10B981;margin:16px 0 8px 0;font-size:14px;font-weight:700;">{html.escape(s[3:])}</h3>')
+            continue
+        elif s.startswith("# "):
+            if in_list:
+                out.append(f"</{list_type}>")
+                in_list = False
+            out.append(f'<h2 style="color:#10B981;margin:18px 0 10px 0;font-size:16px;font-weight:700;">{html.escape(s[2:])}</h2>')
+            continue
+
+        # Bullet list
+        if s.startswith("- ") or s.startswith("* "):
+            if not in_list:
+                out.append('<ul style="margin:6px 0 10px 18px;padding-left:12px;list-style-type:disc;">')
+                in_list = True
+                list_type = "ul"
+            content = html.escape(s[2:])
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", content)
+            content = re.sub(r"`(.+?)`", r'<code style="background:#0F172A;padding:2px 5px;border-radius:4px;border:1px solid #334155;">\1</code>', content)
+            out.append(f'<li style="margin-bottom:5px;line-height:1.5;">{content}</li>')
+            continue
+
+        # Numbered list
+        m_num = re.match(r"^(\d+)\.\s+(.*)", s)
+        if m_num:
+            if not in_list:
+                out.append('<ol style="margin:6px 0 10px 18px;padding-left:12px;list-style-type:decimal;">')
+                in_list = True
+                list_type = "ol"
+            content = html.escape(m_num.group(2))
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", content)
+            content = re.sub(r"`(.+?)`", r'<code style="background:#0F172A;padding:2px 5px;border-radius:4px;border:1px solid #334155;">\1</code>', content)
+            out.append(f'<li style="margin-bottom:5px;line-height:1.5;">{content}</li>')
+            continue
+
+        if in_list:
+            out.append(f"</{list_type}>")
+            in_list = False
+
+        content = html.escape(s)
+        content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", content)
+        content = re.sub(r"`(.+?)`", r'<code style="background:#0F172A;padding:2px 5px;border-radius:4px;border:1px solid #334155;">\1</code>', content)
+        out.append(f'<p style="margin:6px 0;line-height:1.6;">{content}</p>')
+
+    if in_list:
+        out.append(f"</{list_type}>")
+
+    return "\n".join(out)
 
 
 def generate_investigation_summary(db: Session, investigation_id: str) -> Dict[str, Any]:
-    """Generates executive narrative summary for an investigation using local AI model."""
+    """
+    Generates an executive narrative summary grounded strictly in deduplicated investigation evidence.
+    Enforces strict guardrails against AI hallucinations.
+    """
     inv = db.query(Investigation).filter(Investigation.id == investigation_id).first()
     if not inv:
         return {"error": "Investigation not found"}
 
-    findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
-    iocs = db.query(IOC).all()  # Check associated IOCs
+    raw_findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
+    dedup = deduplicate_investigation_findings(raw_findings)
+    risk_data = assess_investigation_risk(raw_findings, target_context=inv.title)
 
-    finding_summaries = []
-    for f in findings:
-        finding_summaries.append(f"- Module: {f.module.upper()} (Type: {f.type})")
+    unique_findings = dedup["unique_findings"]
+    evidence_lines = []
+
+    for uf in unique_findings[:15]:
+        evidence_lines.append(f"- [{uf['module'].upper()}] {uf['indicator']}: {uf['description']} (Severity: {uf['severity']}, Confidence: {uf['confidence']})")
+
+    if not evidence_lines:
+        evidence_summary_text = "No findings recorded. Target infrastructure has not been scanned or yielded zero observations."
+    else:
+        evidence_summary_text = "\n".join(evidence_lines)
 
     prompt = (
-        f"Investigation Title: {inv.title}\n"
+        f"INVESTIGATION DATA BRIEF:\n"
+        f"Case Title: {inv.title}\n"
         f"Status: {inv.status}\n"
         f"Description: {inv.description or 'N/A'}\n"
-        f"Tags: {', '.join(inv.tags or [])}\n"
-        f"Total Findings: {len(findings)}\n"
-        f"Findings Breakdown:\n" + ("\n".join(finding_summaries) if finding_summaries else "No findings recorded yet.") + "\n\n"
-        "Provide a concise executive summary and recommended analyst next steps."
+        f"Calculated Risk Level: {risk_data['risk_level']} (Deterministic Score: {risk_data['risk_score']}/10.0)\n"
+        f"Total Raw Observations: {dedup['total_raw_observations']} | Unique Verified Findings: {dedup['total_unique_findings']}\n\n"
+        f"VERIFIED FINDINGS EVIDENCE:\n{evidence_summary_text}\n\n"
+        f"CRITICAL INSTRUCTIONS FOR AI ANALYST:\n"
+        f"1. Ground your analysis ONLY on the verified findings listed above.\n"
+        f"2. NEVER invent or hallucinate vulnerabilities, open ports, stolen credentials, or malware that are not listed in the evidence.\n"
+        f"3. If findings are clean or zero, explicitly state that no threats were detected and the target appears low-risk or unprobed.\n"
+        f"4. Clearly distinguish verified findings from unverified observations.\n"
+        f"5. Outline 2-3 concrete, actionable recommendations based ONLY on the evidence above.\n\n"
+        f"Structure your response with:\n"
+        f"### Executive Assessment\n"
+        f"### Key Verified Observations\n"
+        f"### Risk & Threat Context\n"
+        f"### Recommended Defensive Actions"
     )
 
-    system_prompt = "You are an OSINT Security Analyst AI assistant. Summarize technical investigation findings clearly."
+    system_prompt = (
+        "You are OSINT-X Senior Cyber Threat Intelligence Analyst. Produce precise, professional, "
+        "and evidence-grounded intelligence briefings. Adhere strictly to verified telemetry."
+    )
+
     ai_result = ollama_client.generate(prompt, system_prompt=system_prompt)
+    raw_summary = ai_result.get("response", "").strip()
 
     return {
         "investigation_id": investigation_id,
         "title": inv.title,
-        "total_findings": len(findings),
-        "summary": ai_result.get("response", ""),
+        "total_findings": len(raw_findings),
+        "total_unique_findings": dedup["total_unique_findings"],
+        "summary": raw_summary,
+        "summary_html": render_markdown_to_html(raw_summary),
         "model_used": ai_result.get("model", settings.OLLAMA_MODEL),
-        "offline_fallback": ai_result.get("offline_fallback", False)
+        "offline_fallback": ai_result.get("offline_fallback", False),
     }
 
 
 def calculate_and_explain_risk(db: Session, investigation_id: str) -> Dict[str, Any]:
     """
-    Computes deterministic risk score (0-10) based on strict rule weights,
-    then uses local AI to generate explanation.
-
-    Score rules:
-      - VirusTotal malicious engines: +0.5 per engine, capped at +4.0
-      - AbuseIPDB confidence > 20%:   proportional, capped at +3.0
-      - Open ports (IP module):        +0.5 per port, capped at +2.0
-      - Email breaches:                +1.0 per breach, capped at +3.0
-      - Disposable email:              +1.0 flat
-      - Missing SPF or DMARC:         +0.5 per missing record, up to +1.0
-      - Domain HTTP security F/D:      +1.5 flat
-      - Username found on 5+ platforms:+1.0 flat
-
-    Level thresholds:
-      SAFE     = 0.0
-      LOW      = 0.1 – 3.9
-      MEDIUM   = 4.0 – 6.9
-      HIGH     = 7.0 – 8.9
-      CRITICAL = 9.0 – 10.0
+    Computes transparent, evidence-based risk assessment using risk_engine,
+    then generates an AI explanation strictly grounded in calculated factors.
     """
     inv = db.query(Investigation).filter(Investigation.id == investigation_id).first()
     if not inv:
         return {"error": "Investigation not found"}
 
-    findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
+    raw_findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
+    risk_assessment = assess_investigation_risk(raw_findings, target_context=inv.title)
 
-    score = 0.0
-    factors = []
-
-    for f in findings:
-        data = f.data or {}
-
-        # ── THREAT INTEL (VirusTotal + AbuseIPDB) ──────────────────────────────
-        if f.module == "threat_intel":
-            vt_obj = data.get("virustotal") or {}
-            vt_data = vt_obj.get("data") if isinstance(vt_obj, dict) else {}
-            vt_attrs = vt_data.get("attributes") if isinstance(vt_data, dict) else {}
-            vt_stats = vt_attrs.get("last_analysis_stats") if isinstance(vt_attrs, dict) else {}
-            malicious = vt_stats.get("malicious", 0) if isinstance(vt_stats, dict) else 0
-            if malicious > 0:
-                inc = round(min(4.0, malicious * 0.5), 1)
-                score += inc
-                factors.append(f"VirusTotal: {malicious} engine(s) flagged as malicious (+{inc})")
-
-            abuse_obj = data.get("abuseipdb") or {}
-            abuse_data = abuse_obj.get("data") if isinstance(abuse_obj, dict) else {}
-            abuse_score = abuse_data.get("abuseConfidenceScore", 0) if isinstance(abuse_data, dict) else 0
-            if abuse_score > 20:
-                inc = round(min(3.0, (abuse_score / 100.0) * 3.0), 1)
-                score += inc
-                factors.append(f"AbuseIPDB: {abuse_score}% abuse confidence score (+{inc})")
-
-        # ── IP (Open Ports) ────────────────────────────────────────────────────
-        elif f.module == "ip":
-            ports = data.get("open_ports", [])
-            if isinstance(ports, list) and len(ports) > 0:
-                inc = round(min(2.0, len(ports) * 0.5), 1)
-                score += inc
-                factors.append(f"IP scan: {len(ports)} open port(s) found {ports[:5]} (+{inc})")
-
-        # ── EMAIL ──────────────────────────────────────────────────────────────
-        elif f.module == "email":
-            # Handle both old list format and new dict format
-            raw_breaches = data.get("breaches", {})
-            if isinstance(raw_breaches, dict):
-                breach_count = raw_breaches.get("total_breaches", 0)
-            elif isinstance(raw_breaches, list):
-                breach_count = len(raw_breaches)
-            else:
-                breach_count = 0
-
-            if breach_count > 0:
-                inc = round(min(3.0, breach_count * 1.0), 1)
-                score += inc
-                factors.append(f"Email: found in {breach_count} known data breach(es) (+{inc})")
-
-            # Disposable email penalty
-            if data.get("is_disposable"):
-                score += 1.0
-                factors.append("Email: disposable/burner address used (+1.0)")
-
-            # Missing SPF/DMARC penalty
-            dns_sec = data.get("dns_security") or data.get("email_security") or {}
-            has_spf = dns_sec.get("has_spf") if isinstance(dns_sec, dict) else bool(dns_sec.get("spf"))
-            has_dmarc = dns_sec.get("has_dmarc") if isinstance(dns_sec, dict) else bool(dns_sec.get("dmarc"))
-            missing_records = []
-            if not has_spf:
-                missing_records.append("SPF")
-                score += 0.5
-            if not has_dmarc:
-                missing_records.append("DMARC")
-                score += 0.5
-            if missing_records:
-                factors.append(f"Email domain missing: {', '.join(missing_records)} record(s) (+{0.5 * len(missing_records)})")
-
-        # ── DOMAIN (HTTP Security Headers) ────────────────────────────────────
-        elif f.module == "domain":
-            sec_score = data.get("http", {}).get("security_score", "A") if isinstance(data.get("http"), dict) else "A"
-            if sec_score in ["F", "D"]:
-                score += 1.5
-                factors.append(f"Domain: HTTP security header rating is poor ({sec_score}) (+1.5)")
-            elif sec_score == "C":
-                score += 0.5
-                factors.append(f"Domain: HTTP security header rating is weak ({sec_score}) (+0.5)")
-
-        # ── USERNAME (Found on many platforms) ────────────────────────────────
-        elif f.module == "username":
-            summary = data.get("summary") or {}
-            total_found = summary.get("total_found", 0) if isinstance(summary, dict) else 0
-            if total_found >= 5:
-                score += 1.0
-                factors.append(f"Username: active on {total_found} public platforms (+1.0)")
-
-    # ── Final score & level ────────────────────────────────────────────────────
-    final_score = round(min(10.0, score), 1)
-
-    if final_score == 0.0:
-        level = "SAFE"
-    elif final_score < 4.0:
-        level = "LOW"
-    elif final_score < 7.0:
-        level = "MEDIUM"
-    elif final_score < 9.0:
-        level = "HIGH"
-    else:
-        level = "CRITICAL"
-
-    # ── AI explanation ─────────────────────────────────────────────────────────
-    if factors:
-        factors_text = "\n".join(f"  - {fac}" for fac in factors)
-    else:
-        factors_text = "  - No high-risk indicators detected across any module."
+    factors = risk_assessment["scoring_factors"]
+    factors_text = "\n".join(
+        f"- {fac['name']} (+{fac['contribution']} pts): {fac['evidence']} [Severity: {fac['severity']}]"
+        for fac in factors
+    ) if factors else "- No risk factors detected. Infrastructure posture is clean."
 
     prompt = (
-        f"Investigation: {inv.title}\n"
-        f"Calculated Risk Score: {final_score}/10 ({level})\n"
-        f"Risk Factors Identified:\n{factors_text}\n\n"
-        "Briefly explain to the security team why this risk level was assigned and what actions to take."
+        f"Investigation Case: {inv.title}\n"
+        f"Calculated Threat Score: {risk_assessment['risk_score']} / 10.0\n"
+        f"Assigned Risk Level: {risk_assessment['risk_level']}\n"
+        f"Organizational Impact: {risk_assessment['organizational_impact']}\n"
+        f"Analytical Confidence: {risk_assessment['confidence']}\n\n"
+        f"Identified Risk Contributors:\n{factors_text}\n\n"
+        f"Explain in 2-3 concise paragraphs why this exact score and risk level were determined. "
+        f"Do NOT invent any vulnerabilities or ports not in the list above. Conclude with recommended priority actions."
     )
-    ai_res = ollama_client.generate(prompt)
 
-    return {
-        "investigation_id": investigation_id,
-        "risk_score": final_score,
-        "risk_level": level,
-        "risk_factors": factors,
-        "explanation": ai_res.get("response", "").strip(),
-        "is_deterministic": True,
-        "offline_fallback": ai_res.get("offline_fallback", False),
-    }
+    system_prompt = "You are a Cyber Threat Intelligence Risk Officer. Provide objective, mathematically aligned threat risk analysis."
+    ai_res = ollama_client.generate(prompt, system_prompt=system_prompt)
+    explanation = ai_res.get("response", "").strip()
+
+    result = dict(risk_assessment)
+    result["investigation_id"] = investigation_id
+    result["explanation"] = explanation
+    result["explanation_html"] = render_markdown_to_html(explanation)
+    result["is_deterministic"] = True
+    result["offline_fallback"] = ai_res.get("offline_fallback", False)
+    # Backward compatibility fields
+    result["risk_factors"] = [f"{fac['name']} (+{fac['contribution']}): {fac['raw_metric']}" for fac in factors]
+
+    return result
+
+
+def map_mitre_attack(db: Session, investigation_id: str) -> Dict[str, Any]:
+    """
+    Maps investigation findings to the MITRE ATT&CK Enterprise Matrix,
+    clearly differentiating OSINT-X tool reconnaissance from observed adversary behavior.
+    """
+    inv = db.query(Investigation).filter(Investigation.id == investigation_id).first()
+    if not inv:
+        return {"error": "Investigation not found"}
+
+    raw_findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
+    mitre_data = map_investigation_mitre(raw_findings)
+    mitre_data["investigation_id"] = investigation_id
+    mitre_data["is_deterministic"] = True
+
+    return mitre_data
+
 
 
 def correlate_iocs(db: Session, investigation_id: str) -> Dict[str, Any]:
