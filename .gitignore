@@ -1,94 +1,32 @@
-# ============================================================
 # Python
-# ============================================================
 __pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.so
+*.pyc
 .venv/
 venv/
-env/
-ENV/
 *.egg-info/
-*.egg
-dist/
-build/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-coverage.xml
 
-# ============================================================
-# Node / Frontend
-# ============================================================
+# Node
 node_modules/
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+dist/
 
-# ============================================================
-# Environment & Secrets  ← NEVER commit these
-# ============================================================
+# Env
 .env
-.env.*
-!.env.example
-backend/.env
-backend/.env.*
+.env.example
+.env.example
 
-# ============================================================
-# Database files  ← contain user data, passwords (hashed)
-# ============================================================
+# Database
 *.db
-*.sqlite
+*.sqlite    
 *.sqlite3
-backend/osintx.db
-osintx.db
 
-# ============================================================
 # Logs
-# ============================================================
 logs/
 *.log
-backend/logs/
 
-# ============================================================
-# Debug / Scratch scripts  ← one-off files, not production code
-# ============================================================
-check_keys.py
-scratch_*.py
-debug_*.py
-
-# ============================================================
-# OS / Editor artifacts
-# ============================================================
+# OS
 .DS_Store
 Thumbs.db
-*.swp
-*.swo
-.idea/
-.vscode/
-*.iml
 
-# ============================================================
-# Docker overrides
-# ============================================================
+# Docker
 docker-compose.override.yml
-
-# ============================================================
-# Alembic (keep migrations, ignore generated diffs)
-# ============================================================
-# backend/alembic/versions/*.py   ← intentionally NOT ignored
-
-# ============================================================
-# Misc
-# ============================================================
-*.bak
-*.tmp
-package-lock.json
