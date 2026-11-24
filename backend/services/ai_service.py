@@ -274,32 +274,34 @@ def correlate_iocs(db: Session, investigation_id: str) -> Dict[str, Any]:
 
 
 def map_mitre_attack(db: Session, investigation_id: str) -> Dict[str, Any]:
-    """Maps investigation findings to deterministic MITRE ATT&CK Matrix techniques."""
+    """
+    Maps investigation findings to deterministic MITRE ATT&CK Matrix techniques.
+
+    Delegates entirely to map_investigation_mitre() from mitre_mapper, which owns
+    the authoritative TECHNIQUE_CATALOG and all module-to-technique mapping logic.
+    Duplicate technique IDs are suppressed by map_investigation_mitre() internally.
+    Returns the full structured response with investigation_id and is_deterministic flag
+    for API and test compatibility.
+    """
     inv = db.query(Investigation).filter(Investigation.id == investigation_id).first()
     if not inv:
         return {"error": "Investigation not found"}
 
     findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
-    
-    mapped_techniques = []
-    seen_technique_ids = set()
 
-    for f in findings:
-        techs = MITRE_ATTACK_LOOKUP.get(f.module, [])
-        for t in techs:
-            if t["technique_id"] not in seen_technique_ids:
-                seen_technique_ids.add(t["technique_id"])
-                mapped_techniques.append(t)
-
-    # If no findings yet, provide default Reconnaissance techniques
-    if not mapped_techniques:
-        mapped_techniques.append(MITRE_ATTACK_LOOKUP["domain"][0])
+    # Delegate all lookup and mapping logic to the authoritative mitre_mapper module.
+    # map_investigation_mitre() uses TECHNIQUE_CATALOG, handles all modules (domain, ip,
+    # email, username, file, threat_intel), suppresses duplicates, and provides a safe
+    # informational fallback when no findings are present.
+    mitre_result = map_investigation_mitre(findings)
 
     return {
         "investigation_id": investigation_id,
-        "total_techniques_mapped": len(mapped_techniques),
-        "mitre_attack_matrix": mapped_techniques,
-        "is_deterministic": True
+        "total_techniques_mapped": mitre_result["total_techniques_mapped"],
+        "mitre_attack_matrix": mitre_result["mitre_attack_matrix"],
+        "tool_reconnaissance_count": mitre_result.get("tool_reconnaissance_count", 0),
+        "adversary_behavior_count": mitre_result.get("adversary_behavior_count", 0),
+        "is_deterministic": True,
     }
 
 

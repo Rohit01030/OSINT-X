@@ -24,6 +24,15 @@ TECHNIQUE_CATALOG = {
         "mapping_reason": "OSINT-X queried authoritative DNS servers (A, AAAA, MX, NS, TXT) to discover domain architecture.",
         "confidence": "HIGH",
     },
+    "domain_whois": {
+        "technique_id": "T1590.001",
+        "tactic": "Reconnaissance",
+        "technique_name": "Gather Victim Network Information: Domain Properties",
+        "description": "Adversaries may gather domain registration details (registrar, registrant, creation/expiry dates) from WHOIS databases to identify ownership and attack surface.",
+        "mapping_type": "TOOL_COLLECTION_ACTIVITY",
+        "mapping_reason": "OSINT-X queried WHOIS registries to retrieve domain registration metadata including registrar, registrant, and expiry date.",
+        "confidence": "HIGH",
+    },
     "domain_subdomains": {
         "technique_id": "T1596.001",
         "tactic": "Reconnaissance",
@@ -122,6 +131,13 @@ def map_investigation_mitre(findings: List[Any]) -> Dict[str, Any]:
                 seen_ids.add("domain_dns")
                 item = dict(TECHNIQUE_CATALOG["domain_dns"])
                 item["evidence"] = f"DNS queries executed for domain '{target}'"
+                mapped_items.append(item)
+
+            # WHOIS lookup is always performed as part of a domain scan
+            if "domain_whois" not in seen_ids:
+                seen_ids.add("domain_whois")
+                item = dict(TECHNIQUE_CATALOG["domain_whois"])
+                item["evidence"] = f"WHOIS registry queried for domain registration metadata of '{target}'"
                 mapped_items.append(item)
 
             if data.get("subdomains"):
