@@ -143,6 +143,7 @@ def get_geo_map(db: Session, investigation_id: str) -> Dict[str, Any]:
 
     findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
     locations = []
+    seen_ips = set()
 
     for f in findings:
         data = f.data or {}
@@ -151,49 +152,70 @@ def get_geo_map(db: Session, investigation_id: str) -> Dict[str, Any]:
         # IP Module findings
         if f.module == "ip":
             geoip = data.get("geoip", {})
-            locations.append({
-                "ip": target or "8.8.8.8",
-                "country": geoip.get("country", "United States"),
-                "country_code": geoip.get("country_code", "US"),
-                "city": geoip.get("city", "Mountain View"),
-                "latitude": geoip.get("latitude", 37.4056),
-                "longitude": geoip.get("longitude", -122.0775),
-                "isp": geoip.get("isp", "Google LLC"),
-                "source_module": "ip"
-            })
+            lat = geoip.get("lat") or geoip.get("latitude")
+            lon = geoip.get("lon") or geoip.get("longitude")
+            if target and target not in seen_ips and lat and lon:
+                seen_ips.add(target)
+                locations.append({
+                    "ip": target,
+                    "country": geoip.get("country", "Unknown"),
+                    "country_code": geoip.get("country_code", "??"),
+                    "city": geoip.get("city", "Unknown"),
+                    "latitude": lat,
+                    "longitude": lon,
+                    "isp": geoip.get("isp", "Unknown"),
+                    "asn": geoip.get("asn"),
+                    "geo_source": geoip.get("geo_source", "ip-api.com"),
+                    "reverse_dns_count": len(data.get("reverse_dns_domains", [])),
+                    "open_ports_count": len(data.get("open_ports", [])),
+                    "threat_level": (data.get("reputation") or {}).get("threat_level", "Clean"),
+                    "source_module": "ip",
+                })
+
+        # Domain module findings — extract resolved IPs if present
+        elif f.module == "domain":
+            dns_records = data.get("dns_records", {})
+            a_records = dns_records.get("A", [])
+            for ip_addr in a_records:
+                if ip_addr and ip_addr not in seen_ips:
+                    seen_ips.add(ip_addr)
+                    locations.append({
+                        "ip": ip_addr,
+                        "country": "Resolved from domain",
+                        "country_code": "??",
+                        "city": target,
+                        "latitude": None,
+                        "longitude": None,
+                        "isp": "",
+                        "source_module": "domain",
+                    })
 
         # Threat Intel Shodan findings
         elif f.module == "threat_intel":
             shodan_res = data.get("shodan", {})
             if shodan_res and "ip_str" in shodan_res:
-                locations.append({
-                    "ip": shodan_res.get("ip_str", target),
-                    "country": shodan_res.get("country_name", "Cloudflare CDN"),
-                    "country_code": "US",
-                    "city": "San Francisco",
-                    "latitude": 37.7749,
-                    "longitude": -122.4194,
-                    "isp": shodan_res.get("isp", "Cloudflare, Inc."),
-                    "source_module": "threat_intel"
-                })
+                s_ip = shodan_res.get("ip_str", target)
+                if s_ip and s_ip not in seen_ips:
+                    seen_ips.add(s_ip)
+                    locations.append({
+                        "ip": s_ip,
+                        "country": shodan_res.get("country_name", "Unknown"),
+                        "country_code": shodan_res.get("country_code", "??"),
+                        "city": shodan_res.get("city", "Unknown"),
+                        "latitude": shodan_res.get("latitude"),
+                        "longitude": shodan_res.get("longitude"),
+                        "isp": shodan_res.get("isp", "Unknown"),
+                        "source_module": "threat_intel",
+                    })
 
-    # Default fallback target location if no IP findings exist yet
-    if not locations:
-        locations.append({
-            "ip": "8.8.8.8",
-            "country": "United States",
-            "country_code": "US",
-            "city": "Mountain View",
-            "latitude": 37.4056,
-            "longitude": -122.0775,
-            "isp": "Google LLC (Sample GeoIP)",
-            "source_module": "sample"
-        })
+    # Filter out locations without valid coordinates for map rendering
+    map_locations = [loc for loc in locations if loc.get("latitude") and loc.get("longitude")]
 
     return {
         "investigation_id": investigation_id,
-        "total_locations": len(locations),
-        "locations": locations
+        "total_locations": len(map_locations),
+        "total_ip_findings": len(locations),
+        "locations": map_locations,
     }
 
 

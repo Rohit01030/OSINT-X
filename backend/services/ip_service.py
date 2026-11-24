@@ -19,6 +19,91 @@ from core.consent import log_consent
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Multi-Source GeoIP Fusion
+# ---------------------------------------------------------------------------
+
+def _query_ipapi(ip_address: str) -> Dict[str, Any]:
+    """Primary GeoIP source: ip-api.com (free, no key, 45 req/min)."""
+    try:
+        url = f"http://ip-api.com/json/{ip_address}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as"
+        with httpx.Client(timeout=4.0) as client:
+            resp = client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "success":
+                    return {
+                        "country": data.get("country"),
+                        "country_code": data.get("countryCode"),
+                        "region": data.get("regionName"),
+                        "city": data.get("city"),
+                        "zip": data.get("zip"),
+                        "lat": data.get("lat"),
+                        "lon": data.get("lon"),
+                        "timezone": data.get("timezone"),
+                        "isp": data.get("isp"),
+                        "org": data.get("org"),
+                        "asn": data.get("as"),
+                        "source": "ip-api.com",
+                    }
+    except Exception as e:
+        logger.debug("ip-api.com failed for %s: %s", ip_address, e)
+    return {}
+
+
+def _query_ipwho(ip_address: str) -> Dict[str, Any]:
+    """Secondary GeoIP source: ipwho.is (free, no key, 10k/month)."""
+    try:
+        url = f"https://ipwho.is/{ip_address}"
+        with httpx.Client(timeout=4.0) as client:
+            resp = client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    conn = data.get("connection", {})
+                    return {
+                        "country": data.get("country"),
+                        "country_code": data.get("country_code"),
+                        "region": data.get("region"),
+                        "city": data.get("city"),
+                        "zip": data.get("postal"),
+                        "lat": data.get("latitude"),
+                        "lon": data.get("longitude"),
+                        "timezone": (data.get("timezone", {}) or {}).get("id"),
+                        "isp": conn.get("isp"),
+                        "org": conn.get("org"),
+                        "asn": f"AS{conn.get('asn', '')}" if conn.get("asn") else None,
+                        "source": "ipwho.is",
+                    }
+    except Exception as e:
+        logger.debug("ipwho.is failed for %s: %s", ip_address, e)
+    return {}
+
+
+def get_reverse_ip(ip_address: str) -> List[Dict[str, Any]]:
+    """
+    Reverse IP lookup — finds all domains hosted on the same IP.
+    Uses HackerTarget free API (no key, rate-limited).
+    """
+    domains: List[Dict[str, Any]] = []
+    try:
+        url = f"https://api.hackertarget.com/reverseiplookup/?q={ip_address}"
+        with httpx.Client(timeout=6.0) as client:
+            resp = client.get(url)
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                # HackerTarget returns one domain per line, or an error string
+                if text and "error" not in text.lower() and "API count" not in text:
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line and line != ip_address:
+                            domains.append({"domain": line})
+    except Exception as e:
+        logger.debug("Reverse IP lookup failed for %s: %s", ip_address, e)
+    return domains[:50]  # cap at 50
+
+
 # Common ports to audit during active scans
 COMMON_PORTS = [
     {"port": 21, "service": "FTP"},
@@ -44,7 +129,9 @@ COMMON_PORTS = [
 
 def get_geoip_data(ip_address: str) -> Dict[str, Any]:
     """
-    Performs GeoIP and ASN/ISP lookup via public RDAP / GeoIP API.
+    Performs GeoIP lookup with multi-source fusion for best accuracy.
+    Sources: ip-api.com (primary) → ipwho.is (secondary fallback).
+    Also includes reverse IP lookup for co-hosted domains.
     """
     result: Dict[str, Any] = {
         "ip": ip_address,
@@ -59,32 +146,45 @@ def get_geoip_data(ip_address: str) -> Dict[str, Any]:
         "isp": None,
         "org": None,
         "asn": None,
+        "geo_source": None,
+        "geo_sources_queried": [],
+        "reverse_dns_domains": [],
         "error": None,
     }
 
+    # --- Source 1: ip-api.com ---
+    primary = _query_ipapi(ip_address)
+    result["geo_sources_queried"].append("ip-api.com")
+    if primary:
+        for key in ["country", "country_code", "region", "city", "zip",
+                     "lat", "lon", "timezone", "isp", "org", "asn"]:
+            result[key] = primary.get(key)
+        result["geo_source"] = "ip-api.com"
+
+    # --- Source 2: ipwho.is (fallback or enrichment) ---
+    if not primary or not primary.get("lat"):
+        secondary = _query_ipwho(ip_address)
+        result["geo_sources_queried"].append("ipwho.is")
+        if secondary:
+            # Fill in any missing fields from primary
+            for key in ["country", "country_code", "region", "city", "zip",
+                         "lat", "lon", "timezone", "isp", "org", "asn"]:
+                if not result.get(key) and secondary.get(key):
+                    result[key] = secondary.get(key)
+            if not result["geo_source"]:
+                result["geo_source"] = "ipwho.is"
+            else:
+                result["geo_source"] = "ip-api.com + ipwho.is"
+
+    # --- Reverse IP Lookup ---
     try:
-        url = f"http://ip-api.com/json/{ip_address}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as"
-        with httpx.Client(timeout=4.0) as client:
-            resp = client.get(url)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("status") == "success":
-                    result["country"] = data.get("country")
-                    result["country_code"] = data.get("countryCode")
-                    result["region"] = data.get("regionName")
-                    result["city"] = data.get("city")
-                    result["zip"] = data.get("zip")
-                    result["lat"] = data.get("lat")
-                    result["lon"] = data.get("lon")
-                    result["timezone"] = data.get("timezone")
-                    result["isp"] = data.get("isp")
-                    result["org"] = data.get("org")
-                    result["asn"] = data.get("as")
-                else:
-                    result["error"] = data.get("message", "GeoIP lookup failed")
+        reverse_domains = get_reverse_ip(ip_address)
+        result["reverse_dns_domains"] = reverse_domains
     except Exception as e:
-        logger.warning("GeoIP lookup error for %s: %s", ip_address, e)
-        result["error"] = str(e)
+        logger.debug("Reverse IP skipped for %s: %s", ip_address, e)
+
+    if not result["lat"] and not result["country"]:
+        result["error"] = "All GeoIP sources failed or returned no data"
 
     return result
 
@@ -203,6 +303,13 @@ def analyze_ip(
     finding_id = str(uuid.uuid4())
 
     # 3. Assemble Finding Data Payload
+    # Build map URLs from coordinates
+    map_links = {}
+    if geoip_data.get("lat") and geoip_data.get("lon"):
+        lat, lon = geoip_data["lat"], geoip_data["lon"]
+        map_links["google_maps"] = f"https://www.google.com/maps?q={lat},{lon}"
+        map_links["openstreetmap"] = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=12/{lat}/{lon}"
+
     scan_result = {
         "finding_id": finding_id,
         "target": target_ip,
@@ -210,6 +317,8 @@ def analyze_ip(
         "geoip": geoip_data,
         "reputation": reputation_data,
         "open_ports": open_ports_data,
+        "reverse_dns_domains": geoip_data.get("reverse_dns_domains", []),
+        "map_links": map_links,
         "consent_confirmed": consent_confirmed,
         "consent_logged": consent_logged,
         "summary": {
@@ -218,6 +327,8 @@ def analyze_ip(
             "isp": geoip_data.get("isp"),
             "open_ports_count": len(open_ports_data),
             "threat_level": reputation_data.get("threat_level", "Clean"),
+            "co_hosted_domains": len(geoip_data.get("reverse_dns_domains", [])),
+            "geo_source": geoip_data.get("geo_source", "ip-api.com"),
         },
     }
 

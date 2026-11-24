@@ -1,6 +1,135 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { analyzeIp } from "../services/api";
 
+/* ------------------------------------------------------------------ */
+/* Lazy Leaflet loader — avoids SSR issues & keeps bundle clean       */
+/* ------------------------------------------------------------------ */
+let L = null;
+let leafletLoaded = false;
+
+function ensureLeafletCSS() {
+  if (typeof document === "undefined") return;
+  if (document.getElementById("leaflet-css")) return;
+  const link = document.createElement("link");
+  link.id = "leaflet-css";
+  link.rel = "stylesheet";
+  link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+  document.head.appendChild(link);
+}
+
+/* ------------------------------------------------------------------ */
+/* Inline Map component using raw Leaflet (no react-leaflet needed)   */
+/* ------------------------------------------------------------------ */
+function LeafletMap({ lat, lon, label, zoom = 10 }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+
+  useEffect(() => {
+    if (!lat || !lon) return;
+    ensureLeafletCSS();
+
+    let cancelled = false;
+
+    async function init() {
+      if (!L) {
+        const mod = await import("leaflet");
+        L = mod.default || mod;
+        leafletLoaded = true;
+      }
+      if (cancelled || !containerRef.current) return;
+
+      // Destroy previous map instance
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+
+      const map = L.map(containerRef.current, {
+        center: [lat, lon],
+        zoom,
+        scrollWheelZoom: true,
+        attributionControl: true,
+      });
+
+      // Dark-themed tile layer (CartoDB Dark Matter)
+      L.tileLayer(
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        {
+          attribution:
+            '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://osm.org/copyright">OSM</a>',
+          subdomains: "abcd",
+          maxZoom: 19,
+        }
+      ).addTo(map);
+
+      // Custom green pulsing marker icon
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="
+          width:18px;height:18px;border-radius:50%;
+          background:#10B981;border:3px solid #064E3B;
+          box-shadow:0 0 12px 4px rgba(16,185,129,0.5);
+        "></div>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+
+      L.marker([lat, lon], { icon })
+        .addTo(map)
+        .bindPopup(
+          `<div style="font-family:monospace;font-size:12px;min-width:160px;">
+            <strong>${label || "Target"}</strong><br/>
+            Lat: ${lat}<br/>Lon: ${lon}
+          </div>`
+        );
+
+      // Accuracy radius (~50km city-level)
+      L.circle([lat, lon], {
+        radius: 50000,
+        color: "#10B981",
+        fillColor: "#10B981",
+        fillOpacity: 0.08,
+        weight: 1,
+        dashArray: "6 4",
+      }).addTo(map);
+
+      mapRef.current = map;
+
+      // Fix tile loading on dynamic containers
+      setTimeout(() => map.invalidateSize(), 200);
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [lat, lon, zoom, label]);
+
+  if (!lat || !lon) {
+    return (
+      <div className="p-8 text-center text-xs font-mono text-ink-muted bg-base-bg rounded border border-base-border">
+        No coordinates available for map rendering.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ height: "380px", width: "100%", borderRadius: "8px" }}
+      className="border border-base-border bg-base-bg"
+    />
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Main component                                                      */
+/* ------------------------------------------------------------------ */
 export default function IpIntelModule({ investigationId, onScanComplete }) {
   const [targetIp, setTargetIp] = useState("");
   const [consentConfirmed, setConsentConfirmed] = useState(false);
@@ -52,6 +181,11 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
   const geo = scanResult?.geoip || {};
   const reputation = scanResult?.reputation || {};
   const ports = scanResult?.open_ports || [];
+  const reverseDomains = scanResult?.reverse_dns_domains || geo?.reverse_dns_domains || [];
+  const mapLinks = scanResult?.map_links || {};
+
+  const tabs = ["summary", "map", "geoip", "ports", "reputation"];
+  if (reverseDomains.length > 0) tabs.splice(4, 0, "reverse-ip");
 
   return (
     <div className="bg-base-surface border border-base-border rounded-lg p-6 space-y-6">
@@ -60,10 +194,10 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
         <div>
           <div className="flex items-center gap-2">
             <span className="text-signal text-xl">🖥️</span>
-            <h3 className="font-mono text-lg font-bold text-ink">IP Intelligence & Consent Gate</h3>
+            <h3 className="font-mono text-lg font-bold text-ink">IP Intelligence & Geolocation</h3>
           </div>
           <p className="text-xs font-mono text-ink-muted mt-1">
-            Passive GeoIP, ASN, and Reputation auditing + Consent-gated TCP port scanning
+            Multi-source GeoIP fusion • Interactive map • Reverse IP • Consent-gated TCP port scanning
           </p>
         </div>
       </div>
@@ -122,7 +256,7 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
       {scanResult && (
         <div className="space-y-6 pt-2">
           {/* Top Metric Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="bg-base-bg border border-base-border rounded-md p-3">
               <span className="text-[10px] font-mono text-ink-muted block uppercase">Country / City</span>
               <span className="font-mono text-sm font-bold text-ink">
@@ -142,31 +276,37 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
               </span>
             </div>
             <div className="bg-base-bg border border-base-border rounded-md p-3">
-              <span className="text-[10px] font-mono text-ink-muted block uppercase">Open Ports Audited</span>
+              <span className="text-[10px] font-mono text-ink-muted block uppercase">Open Ports</span>
               <span className="font-mono text-sm font-bold text-signal">
                 {scanResult.consent_confirmed ? `${ports.length} Open` : "Consent Required"}
+              </span>
+            </div>
+            <div className="bg-base-bg border border-base-border rounded-md p-3">
+              <span className="text-[10px] font-mono text-ink-muted block uppercase">Co-Hosted</span>
+              <span className="font-mono text-sm font-bold text-ink">
+                {reverseDomains.length > 0 ? `${reverseDomains.length} Domains` : "N/A"}
               </span>
             </div>
           </div>
 
           {/* Subtabs */}
-          <div className="flex items-center gap-2 border-b border-base-border">
-            {["summary", "geoip", "ports", "reputation"].map((tab) => (
+          <div className="flex items-center gap-2 border-b border-base-border overflow-x-auto">
+            {tabs.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wide border-b-2 -mb-px transition-colors ${
+                className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wide border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   activeTab === tab
                     ? "border-signal text-signal font-bold"
                     : "border-transparent text-ink-muted hover:text-ink"
                 }`}
               >
-                {tab}
+                {tab === "reverse-ip" ? "Reverse IP" : tab}
               </button>
             ))}
           </div>
 
-          {/* TAB 1: SUMMARY */}
+          {/* TAB: SUMMARY */}
           {activeTab === "summary" && (
             <div className="bg-base-bg border border-base-border rounded-md p-4 space-y-3 font-mono text-xs">
               <div className="flex justify-between py-1 border-b border-base-border/50">
@@ -182,19 +322,73 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
                 <span className="text-ink">{geo.timezone || "N/A"}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-base-border/50">
+                <span className="text-ink-muted">Geo Source:</span>
+                <span className="text-signal font-bold">{geo.geo_source || "ip-api.com"}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-base-border/50">
                 <span className="text-ink-muted">Active Consent Logged:</span>
                 <span className={scanResult.consent_logged ? "text-signal font-bold" : "text-ink-muted"}>
                   {scanResult.consent_logged ? "Yes (Logged to Audit Table)" : "No (Passive Scan Only)"}
                 </span>
               </div>
-              <div className="flex justify-between py-1">
+              <div className="flex justify-between py-1 border-b border-base-border/50">
                 <span className="text-ink-muted">Scan Timestamp:</span>
                 <span className="text-ink">{scanResult.scanned_at ? new Date(scanResult.scanned_at).toLocaleString() : "Just now"}</span>
+              </div>
+              {/* Map Links */}
+              {(mapLinks.google_maps || mapLinks.openstreetmap) && (
+                <div className="flex justify-between py-1 items-center">
+                  <span className="text-ink-muted">View on Map:</span>
+                  <div className="flex gap-2">
+                    {mapLinks.google_maps && (
+                      <a href={mapLinks.google_maps} target="_blank" rel="noopener noreferrer"
+                        className="px-2 py-1 bg-signal/10 border border-signal/30 text-signal rounded text-[10px] hover:bg-signal/20 transition-colors">
+                        Google Maps ↗
+                      </a>
+                    )}
+                    {mapLinks.openstreetmap && (
+                      <a href={mapLinks.openstreetmap} target="_blank" rel="noopener noreferrer"
+                        className="px-2 py-1 bg-signal/10 border border-signal/30 text-signal rounded text-[10px] hover:bg-signal/20 transition-colors">
+                        OpenStreetMap ↗
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: MAP */}
+          {activeTab === "map" && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-xs font-mono text-ink-muted">
+                <span className="w-2 h-2 rounded-full bg-signal animate-pulse" />
+                <span>Interactive Geolocation Map — approximate city-level accuracy (~50km radius)</span>
+              </div>
+              <LeafletMap
+                lat={geo.lat}
+                lon={geo.lon}
+                label={`${scanResult.target} — ${geo.city || "Unknown"}, ${geo.country || "Unknown"}`}
+              />
+              {/* Map quick actions */}
+              <div className="flex gap-2 flex-wrap">
+                {mapLinks.google_maps && (
+                  <a href={mapLinks.google_maps} target="_blank" rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-signal/10 border border-signal/30 text-signal rounded text-xs font-mono hover:bg-signal/20 transition-colors">
+                    🌍 Open in Google Maps ↗
+                  </a>
+                )}
+                {mapLinks.openstreetmap && (
+                  <a href={mapLinks.openstreetmap} target="_blank" rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-signal/10 border border-signal/30 text-signal rounded text-xs font-mono hover:bg-signal/20 transition-colors">
+                    🗺️ Open in OpenStreetMap ↗
+                  </a>
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 2: GEOIP & NETWORK */}
+          {/* TAB: GEOIP & NETWORK */}
           {activeTab === "geoip" && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-mono text-xs">
               <div className="bg-base-bg border border-base-border rounded-md p-4 space-y-2">
@@ -203,6 +397,7 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
                 <p><span className="text-ink-muted">Region:</span> {geo.region || "N/A"}</p>
                 <p><span className="text-ink-muted">City:</span> {geo.city || "N/A"}</p>
                 <p><span className="text-ink-muted">Postal Code:</span> {geo.zip || "N/A"}</p>
+                <p><span className="text-ink-muted">Coordinates:</span> {geo.lat}, {geo.lon}</p>
               </div>
               <div className="bg-base-bg border border-base-border rounded-md p-4 space-y-2">
                 <h4 className="font-bold text-signal mb-2">Autonomous System & Network</h4>
@@ -210,11 +405,12 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
                 <p><span className="text-ink-muted">Organization:</span> {geo.org || "N/A"}</p>
                 <p><span className="text-ink-muted">ASN:</span> {geo.asn || "N/A"}</p>
                 <p><span className="text-ink-muted">Timezone:</span> {geo.timezone || "N/A"}</p>
+                <p><span className="text-ink-muted">Geo Source:</span> <span className="text-signal">{geo.geo_source || "N/A"}</span></p>
               </div>
             </div>
           )}
 
-          {/* TAB 3: OPEN PORTS */}
+          {/* TAB: OPEN PORTS */}
           {activeTab === "ports" && (
             <div className="space-y-3 font-mono text-xs">
               {!scanResult.consent_confirmed ? (
@@ -257,7 +453,35 @@ export default function IpIntelModule({ investigationId, onScanComplete }) {
             </div>
           )}
 
-          {/* TAB 4: REPUTATION */}
+          {/* TAB: REVERSE IP */}
+          {activeTab === "reverse-ip" && reverseDomains.length > 0 && (
+            <div className="space-y-3 font-mono text-xs">
+              <div className="flex items-center gap-2 text-ink-muted">
+                <span className="text-signal font-bold">{reverseDomains.length}</span>
+                <span>domains co-hosted on {scanResult.target}</span>
+              </div>
+              <div className="overflow-x-auto border border-base-border rounded-md">
+                <table className="w-full text-left">
+                  <thead className="bg-base-bg border-b border-base-border text-ink-muted uppercase text-[11px]">
+                    <tr>
+                      <th className="p-3">#</th>
+                      <th className="p-3">Domain</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-base-border/50 bg-base-bg">
+                    {reverseDomains.map((d, idx) => (
+                      <tr key={idx} className="hover:bg-base-surface">
+                        <td className="p-3 text-ink-muted">{idx + 1}</td>
+                        <td className="p-3 font-bold text-ink">{d.domain || d}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: REPUTATION */}
           {activeTab === "reputation" && (
             <div className="bg-base-bg border border-base-border rounded-md p-4 space-y-3 font-mono text-xs">
               <div className="flex justify-between py-1 border-b border-base-border/50">
