@@ -1,256 +1,176 @@
-# OSINT-X — Project Structure (v2)
- 
-An OSINT (Open-Source Intelligence) investigation platform — domain, IP,
-email, username, and file intelligence, threat-intel integrations, and a
-local AI assistant (Ollama-based, no API key required) — built full-stack
-with React, FastAPI, and PostgreSQL.
- 
-> **Build status:** **Phases 1–12 Complete (Full Stack Platform)** — React frontend with all 6 intelligence scanner modules (Domain, IP with Consent Gate, Email, Username, File, Threat Intel), FastAPI backend, PostgreSQL, Redis caching, Celery background worker, local Ollama AI assistant, reporting, visualization, and Docker Compose orchestration.
+# OSINT-X
 
-### Local AI integration · No API keys required · Security-first ordering
+**OSINT-X** is a full-stack, case-driven **Open-Source Intelligence (OSINT) & Threat Analysis Platform** that unifies 7 intelligence modules, interactive visualizations, TLP-classified reporting, security audit logging, and a **100% local AI assistant (Ollama)** inside a single analyst workspace.
+
+> **Privacy-First by Design:** AI analysis runs locally via **Ollama (`llama3:8b`)** with automatic rule-based fallback—zero external LLM API keys and zero case data sent to third-party cloud LLMs.
 
 ---
 
-## 1. What changed from the original plan
+## Key Features
 
-| Change | Why |
-|---|---|
-| AI runs **100% locally via Ollama** | No API key, no cost, no third-party data exposure, works offline |
-| Basic security (rate limiting, input validation) moved into **Phase 1 & 4** | Prevents burning through free-tier API quotas (Shodan/VirusTotal) before Phase 11 even exists |
-| New `findings`, `iocs`, `consent_logs` tables added to schema in Phase 1 | Avoids corrective migrations later; Phase 4–7 modules just insert into `findings` |
-| Explicit **consent gate** added to Phase 5 | Enforces "authorized targets only" in the product, not just the docs |
-| AI kept **out** of security-critical logic (ATT&CK mapping, blacklist scoring) | Those stay deterministic/rule-based; AI only explains and summarizes — no hallucination risk on things that matter |
-
----
-
-## 2. Tech Stack
-
-**Frontend**
-- React + Vite, Tailwind CSS, React Router, Axios, React Query, Chart.js, React Hook Form
-
-**Backend**
-- FastAPI, SQLAlchemy, Alembic, Pydantic, Uvicorn, Passlib
-- Celery + Redis (background jobs — lookups and AI calls run async, don't block requests)
-- slowapi (rate limiting)
-
-**Database**
-- PostgreSQL
-
-**AI (local only)**
-- Ollama, running a local model — Llama 3 8B / Qwen2.5 7B / Mistral 7B (user-selectable)
-- No API key, no internet call at inference time
-- Optional: LangChain for prompt orchestration (not required — a thin direct wrapper is enough)
-
-**DevOps**
-- Docker, Docker Compose, Nginx, GitHub Actions
+- **7 Integrated OSINT Modules**
+  - **Domain Intelligence:** WHOIS/RDAP, DNS records (`A`, `MX`, `NS`, `TXT`), SSL/TLS certificate inspection, HTTP security header grading (`A+`–`F`), tech stack detection, and subdomain enumeration.
+  - **IP Intelligence:** Geolocation, ASN/ISP, reverse DNS, and **consent-gated port scanning**.
+  - **Email Intelligence:** Syntax/domain validation, MX/SPF/DMARC checks, and breach lookup support (HIBP).
+  - **Username Intelligence:** Cross-platform account/profile enumeration.
+  - **File Forensics:** Cryptographic hashing, EXIF/image metadata extraction (`Pillow`), and artifact analysis.
+  - **Threat Intelligence:** Multi-feed reputation scoring across **VirusTotal**, **AbuseIPDB**, and **Shodan** with deterministic simulation fallback when offline or unconfigured.
+  - **Phone Intelligence:** Number validation, carrier lookup, line type (`mobile`, `landline`, etc.), country/prefix, and region lookup via **NumVerify** (with simulation fallback).
+- **Local AI Engine & Chatbot**
+  - Powered by **Ollama (`llama3:8b`)** with an automatic **rule-based fallback engine** when Ollama is offline.
+  - Executive case summaries, risk score explanations, cross-case IOC correlation, deterministic **MITRE ATT&CK** technique mapping, and natural-language search.
+- **Interactive Visualizations:** D3.js entity relationship graph, Leaflet geolocation map, Chart.js metrics, and investigation timeline view.
+- **Security & Governance:** JWT authentication (`HS256`), `bcrypt` password hashing, RBAC (`admin` / `analyst`), `slowapi` rate limiting, `SecurityHeadersMiddleware`, explicit consent logging for active scans, and enterprise audit trails.
 
 ---
 
-## 3. Folder Structure
+## System Architecture
 
+```mermaid
+flowchart TB
+    UI["React 18 + Vite Frontend<br/>Tailwind CSS · D3.js · Leaflet · Chart.js"]
+    API["FastAPI Backend (Uvicorn)<br/>JWT Auth · Rate Limiting · Security Headers"]
+
+    subgraph Services["Backend Services"]
+        OSINT["OSINT Scanners<br/>Domain · IP · Email · Username · File · Threat · Phone"]
+        RISK["Deterministic Engines<br/>Risk Scoring · IOC Correlation · MITRE ATT&CK"]
+        AI["Local AI Client<br/>Ollama + Rule-Based Fallback"]
+    end
+
+    DB[("SQLAlchemy ORM<br/>SQLite / PostgreSQL")]
+    LLM["Local Ollama Server<br/>llama3:8b (localhost:11434)"]
+    EXT["External Threat & OSINT APIs<br/>VirusTotal · AbuseIPDB · Shodan · NumVerify · HIBP"]
+
+    UI -->|REST / JSON + Bearer JWT| API
+    API --> OSINT
+    API --> RISK
+    API --> AI
+    OSINT --> EXT
+    AI --> LLM
+    OSINT --> DB
+    RISK --> DB
 ```
+
+---
+
+## Tech Stack
+
+| Layer | Technologies |
+|---|---|
+| **Frontend** | React 18, Vite 5, Tailwind CSS 3, React Router v6, TanStack React Query, Axios, D3.js, Leaflet / React-Leaflet, Chart.js |
+| **Backend** | Python 3.12, FastAPI 0.115, Uvicorn, Pydantic v2, `slowapi`, `httpx`, `dnspython`, `Pillow` |
+| **Database & Migrations** | SQLAlchemy 2.0, Alembic, SQLite (local dev) / PostgreSQL (`psycopg2-binary`) |
+| **Auth & Security** | `python-jose` (JWT), `bcrypt`, `SecurityHeadersMiddleware`, Consent Gate |
+| **Local AI** | Ollama REST API (`llama3:8b`) + built-in fallback engine |
+
+---
+
+## Investigation & AI Analysis Flow
+
+```mermaid
+flowchart LR
+    A["1. Select / Create Case"] --> B["2. Run OSINT Module<br/>(Domain, IP, Phone, etc.)"]
+    B --> C["3. Deterministic Scoring<br/>& MITRE ATT&CK Mapping"]
+    C --> D["4. Store Findings & IOCs"]
+    D --> E["5. Local AI Summary & Chat<br/>(Ollama or Fallback)"]
+    D --> F["6. Graph / Map Visualization<br/>& TLP Report Export"]
+```
+
+---
+
+## Project Structure
+
+```text
 OSINT-X/
-│
+├── backend/
+│   ├── api/                 # FastAPI routers (auth, investigations, domain, ip, email, username, file_intel, threat_intel, phone_intel, ai_engine, visualization, reports, audit, health)
+│   ├── core/                # Config, security (JWT/bcrypt), rate limiting, validation, consent, logging
+│   ├── database/            # SQLAlchemy engine & session management
+│   ├── middleware/          # Security headers middleware
+│   ├── models/              # ORM models (User, Investigation, Finding, IOC, Report, AuditLog, ConsentLog)
+│   ├── schemas/             # Pydantic schemas
+│   ├── services/            # OSINT scanners, risk engine, MITRE mapper, correlation, Ollama client
+│   ├── tests/               # Pytest suite (phases 1–12 & report system)
+│   ├── alembic/             # Database migrations
+│   ├── main.py              # FastAPI entrypoint
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── assets/
-│   │   ├── components/
-│   │   ├── layouts/
-│   │   ├── pages/
-│   │   ├── hooks/
-│   │   ├── services/
-│   │   ├── routes/
-│   │   ├── contexts/
-│   │   ├── utils/
-│   │   └── App.jsx
-│   ├── public/
+│   │   ├── components/      # Scanner modules (Domain, IP, Email, Username, File, Threat, Phone) & D3/Leaflet/Chart visualizations
+│   │   ├── contexts/        # AuthContext
+│   │   ├── layouts/         # MainLayout
+│   │   ├── pages/           # Dashboard, AiAssistantPage, VisualizationPage, ReportsPage, AuditLogsPage, Login, Register, Landing
+│   │   ├── routes/          # Protected & public routes
+│   │   └── services/        # Axios API clients
 │   └── package.json
-│
-├── backend/
-│   ├── app/
-│   ├── api/
-│   ├── auth/
-│   ├── models/
-│   ├── schemas/
-│   ├── database/
-│   ├── services/
-│   │   ├── domain/
-│   │   ├── ip/
-│   │   ├── email/
-│   │   ├── username/
-│   │   ├── file_analysis/
-│   │   └── threat_intel/
-│   ├── core/
-│   │   ├── rate_limit.py
-│   │   ├── validation.py
-│   │   └── consent.py          # enforces authorized-target confirmation
-│   ├── background/              # Celery tasks (lookups, AI calls)
-│   ├── middleware/
-│   ├── logs/
-│   ├── tests/
-│   ├── main.py
-│   └── requirements.txt
-│
-├── ai/
-│   ├── engine/
-│   │   ├── ollama_client.py     # thin wrapper around local Ollama REST API — no external key
-│   │   ├── summarizer.py        # investigation summary via local model
-│   │   ├── risk_scoring.py      # DETERMINISTIC — no AI, fixed rule weights
-│   │   ├── attack_mapping.py    # DETERMINISTIC — static MITRE ATT&CK lookup table
-│   │   ├── ioc_correlation.py   # rule-based cross-investigation matching
-│   │   └── nl_search.py         # local model translates query -> structured filter
-│   ├── prompts/
-│   │   ├── summary_prompt.txt
-│   │   ├── explain_findings_prompt.txt
-│   │   └── nl_search_prompt.txt
-│   ├── models_config.yaml       # which local model, endpoint, temperature
-│   └── README.md                # documents: no API key, no external calls, fully local
-│
-├── database/
-│   └── migrations/              # Alembic
-│
-├── docker/
-├── nginx/
-├── docs/
-├── scripts/
-├── reports/
-├── screenshots/
-├── .env
 ├── docker-compose.yml
-├── README.md
-└── .gitignore
+└── .env.example
 ```
 
 ---
 
-## 4. Database Schema (updated)
+## Quick Start (Local Development)
 
-**users** — id, username, email, password_hash, role, created_at
+### 1. Configure Environment Variables
 
-**investigations** — id, title, description, created_by, created_at, status, tags[]
+Copy `.env.example` to `.env` (and `backend/.env` if running from `backend/`):
 
-**findings** *(new)* — id, investigation_id, module (`domain`/`ip`/`email`/`username`/`file`/`threat_intel`), type, data (JSONB), created_at
-> Every module (Phase 4–7) writes here. One flexible table instead of a new one per module.
+```powershell
+copy .env.example .env
+```
 
-**iocs** *(new)* — id, value, type (`ip`/`domain`/`hash`/`email`), first_seen, last_seen, source, reputation_score
-> Enables Phase 8's correlation feature — same IOC appearing across investigations gets flagged automatically.
+Optional free-tier API keys (modules run in deterministic simulation mode when left blank):
+- `VIRUSTOTAL_API_KEY`
+- `ABUSEIPDB_API_KEY`
+- `SHODAN_API_KEY`
+- `NUMVERIFY_API_KEY`
+- `HIBP_API_KEY`
 
-**consent_logs** *(new)* — id, user_id, investigation_id, target, confirmed_at, ip_address
-> Written every time a user confirms authorization before an active scan (Phase 5).
+### 2. Start Local AI Chatbot (Optional — Ollama)
 
-**reports** — id, investigation_id, report_path, created_at
+If Ollama is not running, the AI Assistant automatically uses its built-in rule-based fallback engine.
 
-**audit_logs** *(Phase 11)* — id, user_id, action, target, timestamp
+```powershell
+ollama pull llama3:8b
+ollama serve
+```
+
+### 3. Start the Backend (FastAPI)
+
+Run from inside the `backend/` directory so it loads `backend/.env` and `backend/osintx.db`:
+
+```powershell
+cd backend
+pip install -r requirements.txt
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+- API Base URL: `http://127.0.0.1:8000`
+- Interactive Swagger Docs: `http://127.0.0.1:8000/docs`
+
+### 4. Start the Frontend (React + Vite)
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+- Web App: `http://localhost:5173`
 
 ---
 
-## 5. AI Module Design — how "no API key" actually works
+## Running Tests
 
-```
-Frontend → Backend API → Celery task → ai/engine/*.py → Ollama (localhost:11434) → response
-```
-
-- `OLLAMA_BASE_URL=http://ollama:11434` runs as its own Docker Compose service — a model server on your machine, not a hosted API.
-- `ollama_client.py` is the **only** file that talks to the model. Swappable later if you ever want a hosted fallback, but nothing requires it.
-- **Deterministic logic stays deterministic.** Risk scores and ATT&CK mapping are rule-based Python, not model output — AI only writes the human-readable explanation around numbers that are already fixed. This means the platform is accurate even if the local model is small or occasionally imprecise in phrasing.
-- Runs fully offline once the models are pulled (`ollama pull llama3:8b`).
-
----
-
-## 6. Updated 12-Phase Plan
-
-**Phase 1 — Project Setup & Core Security Foundations**
-Git, React+Vite, FastAPI, PostgreSQL, Docker, env vars, folder structure, logging, **+ basic rate limiting & input validation middleware**, **+ `findings`/`iocs`/`consent_logs` tables created now**
-
-**Phase 2 — Authentication & User Management**
-Registration, login, JWT, password hashing, forgot password, email verification, profile, admin role
-
-**Phase 3 — Dashboard & Case Management**
-Dashboard, investigation CRUD, search, tags, notes, favorites, timeline
-
-**Phase 4 — Domain Intelligence Module**
-WHOIS, DNS, reverse DNS, SSL analysis, subdomain enum, HTTP headers, tech detection, security headers — rate-limited endpoints, results written to `findings`
-
-**Phase 5 — IP Intelligence Module + Consent Gate**
-GeoIP, ASN, reputation, blacklist, abuse reports, open ports (**authorized targets only — enforced via required consent checkbox → `consent_logs`**), ISP, map
-
-> **Optional MVP checkpoint:** Phases 1–5 + Phase 10 alone form a demoable, portfolio-ready tool.
-
-**Phase 6 — Email, Username & File Intelligence**
-MX/SPF/DKIM/DMARC, breach status (via HIBP API, not scraped dumps), username search, file metadata/EXIF/hashing
-
-**Phase 7 — Threat Intelligence Integration**
-VirusTotal, AbuseIPDB, AlienVault OTX, Shodan, Censys, urlscan.io — IOC lookup, reputation, feeds, history
-
-**Phase 8 — Local AI Investigation Engine**
-- Investigation summary (template + local model polish)
-- Risk score (deterministic rules; AI explains the "why")
-- IOC correlation (rule-based matching across investigations)
-- MITRE ATT&CK mapping (static lookup table)
-- Natural language search (local model → structured filter, with regular filter UI always available as fallback)
-- No API key, no external calls — Ollama only
-
-**Phase 9 — Visualization**
-Relationship graph, timeline, interactive charts, geo map, network graph
-
-**Phase 10 — Report Generator**
-PDF/CSV/JSON export, executive summary, technical report, AI-assisted narrative section
-
-**Phase 11 — Security & Performance**
-CSRF protection, audit logs, Redis caching, Celery job tuning, pagination, API optimization
-
-**Phase 12 — Deployment & Documentation**
-Docker Compose, Nginx, HTTPS, CI/CD, README, Swagger docs, user guide, architecture diagrams, unit/integration/E2E tests
-
----
-
-## 7. Docker Compose Services
-
-```
-frontend
-backend
-postgres
-redis
-celery-worker
-ollama          ← local model server, no key required
-nginx           ← Phase 12
+```powershell
+pytest backend/tests -o pythonpath=backend
 ```
 
 ---
 
-## 8. Environment Variables (updated)
+## Future Scope
 
-```
-# Frontend
-VITE_API_URL=http://localhost:8000
-
-# Backend
-DATABASE_URL=
-SECRET_KEY=
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=60
-REDIS_URL=
-
-# AI — no API key anywhere
-OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_MODEL=llama3:8b
-
-# Threat intel (only these need keys — all have free tiers)
-VIRUSTOTAL_API_KEY=
-ABUSEIPDB_API_KEY=
-SHODAN_API_KEY=
-```
-
----
-
-## 9. Estimated Timeline
-
-| Phases | Duration |
-|---|---|
-| 1–3 | 2 weeks |
-| 4–7 | 4 weeks |
-| 8–10 | 3 weeks |
-| 11–12 | 2 weeks |
-| **Total** | **~10–12 weeks part-time** |
-
-Note: this is roughly the same timeline as the original AI-included version — local Ollama integration doesn't remove any development time the way dropping AI entirely would, but it does remove all API cost and setup friction for anyone running the project.
+- **Async Scan Workers:** Offload bulk/long-running scans to Celery + Redis with WebSocket progress streaming.
+- **Phone OSINT Persistence & Enrichment:** Persist phone lookup findings/IOCs to cases and integrate VoIP/disposable-number risk feeds.
+- **STIX/TAXII & SIEM Export:** Export indicators in STIX 2.1 format and integrate webhooks for Splunk, Wazuh, and Elastic SIEM.
+- **RAG over Historical Cases:** Index past investigation reports into a local vector store alongside Ollama for cross-case semantic search.
