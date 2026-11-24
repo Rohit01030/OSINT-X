@@ -1357,7 +1357,7 @@ def generate_html_pdf_report(
                     <div><span class="meta-label">Country / Region:</span> <span class="meta-val">{(ip.get('geoip') or {}).get('country', 'N/A')}, {(ip.get('geoip') or {}).get('city', 'N/A')}</span></div>
                     <div><span class="meta-label">ISP / Org:</span> <span class="meta-val">{(ip.get('geoip') or {}).get('isp', 'N/A')}</span></div>
                     <div><span class="meta-label">ASN:</span> <span class="meta-val mono">{(ip.get('geoip') or {}).get('asn', 'N/A')}</span></div>
-                    <div><span class="meta-label">Open Ports:</span> <span class="meta-val mono text-signal">{', '.join(str(p) for p in ip.get('open_ports', [])) if ip.get('open_ports') else "None detected"}</span></div>
+                    <div><span class="meta-label">Open Ports:</span> <span class="meta-val mono text-signal">{', '.join(str(p.get('port', p) if isinstance(p, dict) else p) for p in ip.get('open_ports', [])) if ip.get('open_ports') else "None detected"}</span></div>
                 </div>
             </div>
             """ for ip in mod_intel.get("ip", []))}

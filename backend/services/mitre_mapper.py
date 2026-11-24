@@ -142,7 +142,8 @@ def map_investigation_mitre(findings: List[Any]) -> Dict[str, Any]:
                 if "ip_ports" not in seen_ids:
                     seen_ids.add("ip_ports")
                     item = dict(TECHNIQUE_CATALOG["ip_ports"])
-                    item["evidence"] = f"Socket port probing identified listening ports {data['open_ports']} on '{target}'"
+                    port_list = [p.get('port', p) if isinstance(p, dict) else p for p in data['open_ports']] if isinstance(data['open_ports'], list) else []
+                    item["evidence"] = f"Socket port probing identified listening ports {port_list[:6]} on '{target}'"
                     mapped_items.append(item)
 
         elif module == "email":

@@ -240,7 +240,7 @@ def assess_investigation_risk(findings: List[Any], target_context: Optional[str]
 
                 for p in ports:
                     try:
-                        p_int = int(p)
+                        p_int = int(p.get("port") if isinstance(p, dict) else p)
                     except (ValueError, TypeError):
                         continue
 

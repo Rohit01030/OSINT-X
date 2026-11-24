@@ -178,7 +178,20 @@ def _analyze_finding_attributes(module: str, f_type: str, data: Dict[str, Any]) 
             )
 
     elif module == "ip":
-        ports = data.get("open_ports", [])
+        raw_ports = data.get("open_ports", [])
+        ports = []
+        if isinstance(raw_ports, list):
+            for p in raw_ports:
+                try:
+                    if isinstance(p, dict):
+                        p_num = int(p.get("port") or p.get("number") or 0)
+                    else:
+                        p_num = int(p)
+                    if p_num > 0:
+                        ports.append(p_num)
+                except (ValueError, TypeError):
+                    continue
+
         from services.risk_engine import HIGH_RISK_PORTS
         has_critical = any(p in [23, 445, 1433, 3389, 27017, 6379] for p in ports)
         has_risky = any(p in HIGH_RISK_PORTS for p in ports)
