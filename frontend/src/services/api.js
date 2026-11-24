@@ -163,4 +163,12 @@ export async function analyzeThreatIntel(investigationId, target) {
   return response.data;
 }
 
+// Phone Intelligence Endpoints
+export async function lookupPhone(number) {
+  const response = await api.get("/api/phone/lookup", {
+    params: { number },
+  });
+  return response.data;
+}
+
 export default api;

@@ -13,6 +13,7 @@ import EmailIntelModule from "../components/EmailIntelModule";
 import UsernameIntelModule from "../components/UsernameIntelModule";
 import FileIntelModule from "../components/FileIntelModule";
 import ThreatIntelModule from "../components/ThreatIntelModule";
+import PhoneIntelModule from "../components/PhoneIntelModule";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -455,6 +456,7 @@ export default function Dashboard() {
                 { id: "username_scan", label: "👤 Username" },
                 { id: "file_scan", label: "📁 File Forensics" },
                 { id: "threat_scan", label: "🛡️ Threat Intel" },
+                { id: "phone_scan", label: "📞 Phone" },
                 { id: "settings", label: "⚙️ Settings" },
               ].map((tab) => (
                 <button
@@ -509,6 +511,13 @@ export default function Dashboard() {
 
             {caseModalTab === "threat_scan" && (
               <ThreatIntelModule
+                investigationId={selectedCase.id}
+                onScanComplete={() => fetchData()}
+              />
+            )}
+
+            {caseModalTab === "phone_scan" && (
+              <PhoneIntelModule
                 investigationId={selectedCase.id}
                 onScanComplete={() => fetchData()}
               />

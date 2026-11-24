@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     HIBP_API_KEY: Optional[str] = None
     VIRUSTOTAL_API_KEY: Optional[str] = None
     ABUSEIPDB_API_KEY: Optional[str] = None
+    NUMVERIFY_API_KEY: Optional[str] = None
     SHODAN_API_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

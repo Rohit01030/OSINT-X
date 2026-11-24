@@ -29,8 +29,9 @@ from api.file_intel import router as file_intel_router
 from api.threat_intel import router as threat_intel_router
 from api.ai_engine import router as ai_engine_router
 from api.visualization import router as visualization_router
-from api.reports import router as reports_router
 from api.audit import router as audit_router
+from api.reports import router as reports_router
+from api.phone_intel import router as phone_intel_router
 from middleware.security_headers import SecurityHeadersMiddleware
 
 setup_logging()
@@ -67,6 +68,7 @@ app.include_router(ai_engine_router, prefix="/api")
 app.include_router(visualization_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
+app.include_router(phone_intel_router, prefix="/api")
 
 
 
