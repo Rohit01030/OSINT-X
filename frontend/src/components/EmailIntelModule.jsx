@@ -31,7 +31,25 @@ export default function EmailIntelModule({ investigationId, onScanComplete }) {
     }
   };
 
-  const dnsSec = scanResult?.dns_security || scanResult?.email_security || {};
+  const rawDns = scanResult?.dns_security || null;
+  const rawEmailSec = scanResult?.email_security || null;
+
+  // Normalize dns_security — handle both new schema (dns_security) and old (email_security)
+  const dnsSec = rawDns
+    ? rawDns
+    : rawEmailSec
+    ? {
+        has_spf: Boolean(rawEmailSec.spf),
+        spf_record: rawEmailSec.spf || null,
+        has_dmarc: Boolean(rawEmailSec.dmarc),
+        dmarc_record: rawEmailSec.dmarc || null,
+        has_mx: (rawEmailSec.mx || []).length > 0,
+        mx_records: rawEmailSec.mx || [],
+        dkim_records: rawEmailSec.dkim || [],
+        warnings: rawEmailSec.warnings || [],
+      }
+    : {};
+
   const rawBreaches = scanResult?.breaches;
   const breaches = Array.isArray(rawBreaches)
     ? {
@@ -40,7 +58,11 @@ export default function EmailIntelModule({ investigationId, onScanComplete }) {
         details: rawBreaches,
       }
     : (rawBreaches || {});
-  const domain = scanResult?.domain || scanResult?.email_security?.domain || (scanResult?.target ? scanResult.target.split("@")[1] : "N/A");
+  const domain =
+    scanResult?.domain ||
+    rawDns?.domain ||
+    rawEmailSec?.domain ||
+    (scanResult?.target ? scanResult.target.split("@")[1] : "N/A");
 
   return (
     <div className="bg-base-surface border border-base-border rounded-lg p-6 space-y-6">

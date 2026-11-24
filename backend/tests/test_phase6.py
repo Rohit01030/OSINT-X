@@ -103,6 +103,61 @@ def test_email_service_units(mock_dns):
     assert len(breaches_empty) == 0
 
 
+def test_risk_scoring_logic():
+    """Unit tests for the deterministic risk scoring engine."""
+    from services.ai_service import calculate_and_explain_risk
+    from unittest.mock import MagicMock, patch
+
+    db = MagicMock()
+
+    # --- SAFE: no findings ---
+    inv_safe = MagicMock()
+    inv_safe.id = "inv-safe"
+    inv_safe.title = "Safe Case"
+    inv_safe.status = "active"
+    inv_safe.tags = []
+    db.query.return_value.filter.return_value.first.return_value = inv_safe
+    db.query.return_value.filter.return_value.all.return_value = []
+
+    with patch("services.ai_service.ollama_client") as mock_ollama:
+        mock_ollama.generate.return_value = {"response": "Safe.", "offline_fallback": True}
+        result = calculate_and_explain_risk(db, "inv-safe")
+
+    assert result["risk_score"] == 0.0
+    assert result["risk_level"] == "SAFE"
+    assert result["risk_factors"] == []
+
+    # --- HIGH: email breaches + disposable ---
+    inv_high = MagicMock()
+    inv_high.id = "inv-high"
+    inv_high.title = "High Risk Case"
+    inv_high.status = "active"
+    inv_high.tags = []
+    db.query.return_value.filter.return_value.first.return_value = inv_high
+
+    email_finding = MagicMock()
+    email_finding.module = "email"
+    email_finding.type = "email_scan"
+    email_finding.data = {
+        "domain": "mailinator.com",
+        "is_disposable": True,
+        "breaches": {"total_breaches": 4, "breach_names": ["Adobe", "LinkedIn", "Canva", "Dropbox"], "details": []},
+        "dns_security": {"has_spf": False, "has_dmarc": False},
+    }
+    db.query.return_value.filter.return_value.all.return_value = [email_finding]
+
+    with patch("services.ai_service.ollama_client") as mock_ollama:
+        mock_ollama.generate.return_value = {"response": "High risk.", "offline_fallback": True}
+        result = calculate_and_explain_risk(db, "inv-high")
+
+    # 4 breaches = +3.0 (capped), disposable = +1.0, no SPF = +0.5, no DMARC = +0.5 → total 5.0
+    assert result["risk_score"] == 5.0
+    assert result["risk_level"] == "MEDIUM"
+    assert any("breach" in f.lower() for f in result["risk_factors"])
+    assert any("disposable" in f.lower() for f in result["risk_factors"])
+    assert any("spf" in f.lower() or "dmarc" in f.lower() for f in result["risk_factors"])
+
+
 def test_username_service_units(mock_httpx_username):
     results = asyncio.run(username_service.check_username_platforms("johndoe"))
     github_res = next(r for r in results if r["platform"] == "GitHub")
@@ -168,6 +223,16 @@ def test_phase6_api_workflow(mock_dns, mock_httpx_username):
     assert email_resp.status_code == 200
     e_data = email_resp.json()
     assert e_data["target"] == "test@mocktarget.com"
+    # New schema: top-level domain and dns_security block
+    assert e_data["domain"] == "mocktarget.com"
+    assert e_data["is_valid_format"] is True
+    assert e_data["dns_security"]["has_spf"] is True
+    assert e_data["dns_security"]["has_dmarc"] is True
+    assert e_data["dns_security"]["spf_record"] is not None
+    # Breaches now a dict with total_breaches
+    assert isinstance(e_data["breaches"], dict)
+    assert "total_breaches" in e_data["breaches"]
+    # Backward-compat: email_security raw block still present
     assert e_data["email_security"]["spf"] is not None
 
     # 5. Test Username Analyze Endpoint

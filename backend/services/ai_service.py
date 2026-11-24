@@ -128,19 +128,37 @@ def calculate_and_explain_risk(db: Session, investigation_id: str) -> Dict[str, 
     """
     Computes deterministic risk score (0-10) based on strict rule weights,
     then uses local AI to generate explanation.
+
+    Score rules:
+      - VirusTotal malicious engines: +0.5 per engine, capped at +4.0
+      - AbuseIPDB confidence > 20%:   proportional, capped at +3.0
+      - Open ports (IP module):        +0.5 per port, capped at +2.0
+      - Email breaches:                +1.0 per breach, capped at +3.0
+      - Disposable email:              +1.0 flat
+      - Missing SPF or DMARC:         +0.5 per missing record, up to +1.0
+      - Domain HTTP security F/D:      +1.5 flat
+      - Username found on 5+ platforms:+1.0 flat
+
+    Level thresholds:
+      SAFE     = 0.0
+      LOW      = 0.1 – 3.9
+      MEDIUM   = 4.0 – 6.9
+      HIGH     = 7.0 – 8.9
+      CRITICAL = 9.0 – 10.0
     """
     inv = db.query(Investigation).filter(Investigation.id == investigation_id).first()
     if not inv:
         return {"error": "Investigation not found"}
 
     findings = db.query(Finding).filter(Finding.investigation_id == investigation_id).all()
-    
+
     score = 0.0
     factors = []
 
     for f in findings:
         data = f.data or {}
-        # Threat intel findings
+
+        # ── THREAT INTEL (VirusTotal + AbuseIPDB) ──────────────────────────────
         if f.module == "threat_intel":
             vt_obj = data.get("virustotal") or {}
             vt_data = vt_obj.get("data") if isinstance(vt_obj, dict) else {}
@@ -148,59 +166,104 @@ def calculate_and_explain_risk(db: Session, investigation_id: str) -> Dict[str, 
             vt_stats = vt_attrs.get("last_analysis_stats") if isinstance(vt_attrs, dict) else {}
             malicious = vt_stats.get("malicious", 0) if isinstance(vt_stats, dict) else 0
             if malicious > 0:
-                inc = min(4.0, malicious * 0.5)
+                inc = round(min(4.0, malicious * 0.5), 1)
                 score += inc
-                factors.append(f"VirusTotal detected {malicious} malicious engines (+{inc:.1f})")
+                factors.append(f"VirusTotal: {malicious} engine(s) flagged as malicious (+{inc})")
 
             abuse_obj = data.get("abuseipdb") or {}
             abuse_data = abuse_obj.get("data") if isinstance(abuse_obj, dict) else {}
             abuse_score = abuse_data.get("abuseConfidenceScore", 0) if isinstance(abuse_data, dict) else 0
             if abuse_score > 20:
-                inc = min(3.0, (abuse_score / 100.0) * 3.0)
+                inc = round(min(3.0, (abuse_score / 100.0) * 3.0), 1)
                 score += inc
-                factors.append(f"AbuseIPDB confidence score is {abuse_score}% (+{inc:.1f})")
+                factors.append(f"AbuseIPDB: {abuse_score}% abuse confidence score (+{inc})")
 
-        # IP findings
+        # ── IP (Open Ports) ────────────────────────────────────────────────────
         elif f.module == "ip":
             ports = data.get("open_ports", [])
-            if len(ports) > 0:
-                inc = min(2.0, len(ports) * 0.5)
+            if isinstance(ports, list) and len(ports) > 0:
+                inc = round(min(2.0, len(ports) * 0.5), 1)
                 score += inc
-                factors.append(f"Discovered {len(ports)} open port(s): {ports} (+{inc:.1f})")
+                factors.append(f"IP scan: {len(ports)} open port(s) found {ports[:5]} (+{inc})")
 
-        # Email findings
+        # ── EMAIL ──────────────────────────────────────────────────────────────
         elif f.module == "email":
-            breaches = data.get("breaches", [])
-            if len(breaches) > 0:
-                inc = min(3.0, len(breaches) * 1.0)
-                score += inc
-                factors.append(f"Email target appeared in {len(breaches)} data breach(es) (+{inc:.1f})")
+            # Handle both old list format and new dict format
+            raw_breaches = data.get("breaches", {})
+            if isinstance(raw_breaches, dict):
+                breach_count = raw_breaches.get("total_breaches", 0)
+            elif isinstance(raw_breaches, list):
+                breach_count = len(raw_breaches)
+            else:
+                breach_count = 0
 
-        # Domain findings
+            if breach_count > 0:
+                inc = round(min(3.0, breach_count * 1.0), 1)
+                score += inc
+                factors.append(f"Email: found in {breach_count} known data breach(es) (+{inc})")
+
+            # Disposable email penalty
+            if data.get("is_disposable"):
+                score += 1.0
+                factors.append("Email: disposable/burner address used (+1.0)")
+
+            # Missing SPF/DMARC penalty
+            dns_sec = data.get("dns_security") or data.get("email_security") or {}
+            has_spf = dns_sec.get("has_spf") if isinstance(dns_sec, dict) else bool(dns_sec.get("spf"))
+            has_dmarc = dns_sec.get("has_dmarc") if isinstance(dns_sec, dict) else bool(dns_sec.get("dmarc"))
+            missing_records = []
+            if not has_spf:
+                missing_records.append("SPF")
+                score += 0.5
+            if not has_dmarc:
+                missing_records.append("DMARC")
+                score += 0.5
+            if missing_records:
+                factors.append(f"Email domain missing: {', '.join(missing_records)} record(s) (+{0.5 * len(missing_records)})")
+
+        # ── DOMAIN (HTTP Security Headers) ────────────────────────────────────
         elif f.module == "domain":
-            sec_score = data.get("http", {}).get("security_score", "F")
+            sec_score = data.get("http", {}).get("security_score", "A") if isinstance(data.get("http"), dict) else "A"
             if sec_score in ["F", "D"]:
                 score += 1.5
-                factors.append(f"HTTP security header rating is low ({sec_score}) (+1.5)")
+                factors.append(f"Domain: HTTP security header rating is poor ({sec_score}) (+1.5)")
+            elif sec_score == "C":
+                score += 0.5
+                factors.append(f"Domain: HTTP security header rating is weak ({sec_score}) (+0.5)")
 
-    # Cap max score at 10.0
+        # ── USERNAME (Found on many platforms) ────────────────────────────────
+        elif f.module == "username":
+            summary = data.get("summary") or {}
+            total_found = summary.get("total_found", 0) if isinstance(summary, dict) else 0
+            if total_found >= 5:
+                score += 1.0
+                factors.append(f"Username: active on {total_found} public platforms (+1.0)")
+
+    # ── Final score & level ────────────────────────────────────────────────────
     final_score = round(min(10.0, score), 1)
 
-    if final_score >= 9.0:
-        level = "CRITICAL"
-    elif final_score >= 7.0:
-        level = "HIGH"
-    elif final_score >= 4.0:
-        level = "MEDIUM"
-    else:
+    if final_score == 0.0:
+        level = "SAFE"
+    elif final_score < 4.0:
         level = "LOW"
+    elif final_score < 7.0:
+        level = "MEDIUM"
+    elif final_score < 9.0:
+        level = "HIGH"
+    else:
+        level = "CRITICAL"
 
-    # AI explanation for the deterministic score
+    # ── AI explanation ─────────────────────────────────────────────────────────
+    if factors:
+        factors_text = "\n".join(f"  - {fac}" for fac in factors)
+    else:
+        factors_text = "  - No high-risk indicators detected across any module."
+
     prompt = (
         f"Investigation: {inv.title}\n"
         f"Calculated Risk Score: {final_score}/10 ({level})\n"
-        f"Identified Risk Factors:\n" + ("\n".join(f"- {fac}" for fac in factors) if factors else "- No high-risk indicators found.") + "\n\n"
-        "Explain to the security team why this risk level was assigned."
+        f"Risk Factors Identified:\n{factors_text}\n\n"
+        "Briefly explain to the security team why this risk level was assigned and what actions to take."
     )
     ai_res = ollama_client.generate(prompt)
 
@@ -209,9 +272,9 @@ def calculate_and_explain_risk(db: Session, investigation_id: str) -> Dict[str, 
         "risk_score": final_score,
         "risk_level": level,
         "risk_factors": factors,
-        "explanation": ai_res.get("response", ""),
+        "explanation": ai_res.get("response", "").strip(),
         "is_deterministic": True,
-        "offline_fallback": ai_res.get("offline_fallback", False)
+        "offline_fallback": ai_res.get("offline_fallback", False),
     }
 
 
