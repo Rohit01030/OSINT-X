@@ -89,7 +89,7 @@ export default function Dashboard() {
         .map((t) => t.trim())
         .filter(Boolean);
 
-      await createInvestigation({
+      const created = await createInvestigation({
         title: newTitle.trim(),
         description: newDesc.trim(),
         tags,
@@ -100,6 +100,9 @@ export default function Dashboard() {
       setNewTagsInput("");
       setIsCreateOpen(false);
       await fetchData();
+      if (created?.id) {
+        openCaseDetails(created);
+      }
     } catch (err) {
       setCreateError(err.response?.data?.detail || "Failed to create investigation case.");
     } finally {
@@ -166,6 +169,204 @@ export default function Dashboard() {
         return "bg-base-border text-ink border-base-border";
     }
   };
+
+  if (selectedCase) {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        {/* Full-Screen Case Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-base-border pb-5 gap-4">
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={() => setSelectedCase(null)}
+              className="inline-flex items-center gap-1.5 text-xs font-mono text-signal hover:underline mb-2"
+            >
+              ← Back to Cases
+            </button>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="text-xs font-mono text-ink-muted">
+                Case ID: {selectedCase.id.slice(0, 8)}...
+              </span>
+              <span
+                className={`px-2 py-0.5 text-[10px] font-mono rounded border uppercase ${getStatusBadge(
+                  selectedCase.status
+                )}`}
+              >
+                {selectedCase.status}
+              </span>
+              <span className="text-xs font-mono text-ink-muted">
+                Findings: <span className="text-signal">{selectedCase.findings_count || 0}</span>
+              </span>
+            </div>
+            <h1 className="text-3xl font-mono font-bold text-ink">{selectedCase.title}</h1>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setSelectedCase(null)}
+            className="px-4 py-2 border border-base-border bg-base-surface text-ink-muted hover:text-ink font-mono text-xs rounded-md self-start md:self-auto"
+          >
+            ← All Cases
+          </button>
+        </div>
+
+        {/* Full-Width Module Tabs (wrap cleanly without clipping) */}
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-base-border pb-2">
+          {[
+            { id: "domain_scan", label: "🌐 Domain" },
+            { id: "ip_scan", label: "🖥️ IP Intel" },
+            { id: "email_scan", label: "✉️ Email" },
+            { id: "username_scan", label: "👤 Username" },
+            { id: "file_scan", label: "📁 File Forensics" },
+            { id: "threat_scan", label: "🛡️ Threat Intel" },
+            { id: "phone_scan", label: "📞 Phone" },
+            { id: "settings", label: "⚙️ Settings" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setCaseModalTab(tab.id)}
+              className={`px-3.5 py-2 text-xs font-mono font-bold rounded-md whitespace-nowrap transition-colors ${
+                caseModalTab === tab.id
+                  ? "bg-signal text-base-bg"
+                  : "text-ink-muted hover:text-ink bg-base-surface border border-base-border"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Full-Screen Tab Contents */}
+        <div>
+          {caseModalTab === "domain_scan" && (
+            <DomainIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "ip_scan" && (
+            <IpIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "email_scan" && (
+            <EmailIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "username_scan" && (
+            <UsernameIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "file_scan" && (
+            <FileIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "threat_scan" && (
+            <ThreatIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "phone_scan" && (
+            <PhoneIntelModule
+              investigationId={selectedCase.id}
+              onScanComplete={() => fetchData()}
+            />
+          )}
+
+          {caseModalTab === "settings" && (
+            <div className="bg-base-surface border border-base-border rounded-lg p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-mono text-ink-muted mb-1">Status</label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value)}
+                  className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-sm text-ink focus:border-signal"
+                >
+                  <option value="active">active</option>
+                  <option value="archived">archived</option>
+                  <option value="closed">closed</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-ink-muted mb-1">Description</label>
+                <textarea
+                  rows={3}
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-sm text-ink focus:border-signal"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-ink-muted mb-1">Tags (comma separated)</label>
+                <input
+                  type="text"
+                  value={editTagsInput}
+                  onChange={(e) => setEditTagsInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-sm text-ink focus:border-signal"
+                />
+              </div>
+
+              <div className="bg-base-bg p-3 rounded border border-base-border text-xs font-mono space-y-1">
+                <p className="text-ink-muted">
+                  Created: <span className="text-ink">{new Date(selectedCase.created_at).toLocaleString()}</span>
+                </p>
+                <p className="text-ink-muted">
+                  Created By: <span className="text-ink">{selectedCase.created_by}</span>
+                </p>
+                <p className="text-ink-muted">
+                  Findings recorded: <span className="text-signal">{selectedCase.findings_count || 0}</span>
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-base-border">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteCase(selectedCase.id)}
+                  className="px-3 py-2 bg-risk-critical/15 text-risk-critical border border-risk-critical/30 rounded font-mono text-xs hover:bg-risk-critical/25"
+                >
+                  Delete Case
+                </button>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCase(null)}
+                    className="px-4 py-2 border border-base-border text-ink-muted font-mono text-xs rounded hover:text-ink"
+                  >
+                    Back to Cases
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleUpdateCase}
+                    disabled={editSubmitting}
+                    className="px-4 py-2 bg-signal text-base-bg font-mono text-xs font-bold rounded hover:bg-signal-dim"
+                  >
+                    {editSubmitting ? "Saving..." : "Save Changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-10 space-y-8">
@@ -428,175 +629,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* MANAGE CASE & SCANNER DRAWER MODAL */}
-      {selectedCase && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-base-surface border border-base-border rounded-lg max-w-4xl w-full p-6 shadow-2xl space-y-6 my-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-base-border pb-4 gap-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-ink-muted">Case ID: {selectedCase.id.slice(0, 8)}...</span>
-                  <span className={`px-2 py-0.5 text-[10px] font-mono rounded border uppercase ${getStatusBadge(selectedCase.status)}`}>
-                    {selectedCase.status}
-                  </span>
-                </div>
-                <h2 className="text-2xl font-mono font-bold text-ink mt-0.5">{selectedCase.title}</h2>
-              </div>
-              <button onClick={() => setSelectedCase(null)} className="text-ink-muted hover:text-ink text-xl self-end md:self-auto">
-                ✕
-              </button>
-            </div>
-
-            {/* Modal Tabs */}
-            <div className="flex items-center gap-1 border-b border-base-border overflow-x-auto pb-1">
-              {[
-                { id: "domain_scan", label: "🌐 Domain" },
-                { id: "ip_scan", label: "🖥️ IP Intel" },
-                { id: "email_scan", label: "✉️ Email" },
-                { id: "username_scan", label: "👤 Username" },
-                { id: "file_scan", label: "📁 File Forensics" },
-                { id: "threat_scan", label: "🛡️ Threat Intel" },
-                { id: "phone_scan", label: "📞 Phone" },
-                { id: "settings", label: "⚙️ Settings" },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setCaseModalTab(tab.id)}
-                  className={`px-3 py-2 text-xs font-mono font-bold rounded-t-md whitespace-nowrap transition-colors ${
-                    caseModalTab === tab.id
-                      ? "bg-signal text-base-bg"
-                      : "text-ink-muted hover:text-ink bg-base-bg"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* TAB CONTENTS */}
-            {caseModalTab === "domain_scan" && (
-              <DomainIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {caseModalTab === "ip_scan" && (
-              <IpIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {caseModalTab === "email_scan" && (
-              <EmailIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {caseModalTab === "username_scan" && (
-              <UsernameIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {caseModalTab === "file_scan" && (
-              <FileIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {caseModalTab === "threat_scan" && (
-              <ThreatIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {caseModalTab === "phone_scan" && (
-              <PhoneIntelModule
-                investigationId={selectedCase.id}
-                onScanComplete={() => fetchData()}
-              />
-            )}
-
-            {/* TAB CONTENT 2: CASE SETTINGS */}
-            {caseModalTab === "settings" && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-mono text-ink-muted mb-1">Status</label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-sm text-ink focus:border-signal"
-                  >
-                    <option value="active">active</option>
-                    <option value="archived">archived</option>
-                    <option value="closed">closed</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-ink-muted mb-1">Description</label>
-                  <textarea
-                    rows={3}
-                    value={editDesc}
-                    onChange={(e) => setEditDesc(e.target.value)}
-                    className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-sm text-ink focus:border-signal"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-ink-muted mb-1">Tags (comma separated)</label>
-                  <input
-                    type="text"
-                    value={editTagsInput}
-                    onChange={(e) => setEditTagsInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-base-bg border border-base-border rounded text-sm text-ink focus:border-signal"
-                  />
-                </div>
-
-                <div className="bg-base-bg p-3 rounded border border-base-border text-xs font-mono space-y-1">
-                  <p className="text-ink-muted">Created: <span className="text-ink">{new Date(selectedCase.created_at).toLocaleString()}</span></p>
-                  <p className="text-ink-muted">Created By: <span className="text-ink">{selectedCase.created_by}</span></p>
-                  <p className="text-ink-muted">Findings recorded: <span className="text-signal">{selectedCase.findings_count || 0}</span></p>
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t border-base-border">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteCase(selectedCase.id)}
-                    className="px-3 py-2 bg-risk-critical/15 text-risk-critical border border-risk-critical/30 rounded font-mono text-xs hover:bg-risk-critical/25"
-                  >
-                    Delete Case
-                  </button>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCase(null)}
-                      className="px-4 py-2 border border-base-border text-ink-muted font-mono text-xs rounded hover:text-ink"
-                    >
-                      Close
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleUpdateCase}
-                      disabled={editSubmitting}
-                      className="px-4 py-2 bg-signal text-base-bg font-mono text-xs font-bold rounded hover:bg-signal-dim"
-                    >
-                      {editSubmitting ? "Saving..." : "Save Changes"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

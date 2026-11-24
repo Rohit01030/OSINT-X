@@ -190,7 +190,7 @@ export default function FileIntelModule({ investigationId, onScanComplete }) {
             {[
               { id: "summary", label: "Summary" },
               { id: "hashes", label: "Cryptographic Hashes" },
-              { id: "exif", label: "EXIF & Geolocation" },
+              { id: "exif", label: "EXIF, PDF & Metadata" },
               { id: "threat", label: "Threat Intelligence" },
             ].map((tab) => (
               <button
@@ -274,15 +274,37 @@ export default function FileIntelModule({ investigationId, onScanComplete }) {
             </div>
           )}
 
-          {/* TAB 3: EXIF FORENSICS & GEOLOCATION */}
+          {/* TAB 3: EXIF FORENSICS, PDF & METADATA */}
           {activeTab === "exif" && (
             <div className="space-y-4 font-mono text-xs">
-              {!exif.has_exif ? (
+              {!exif.has_exif && (!docForensics || Object.keys(docForensics).length === 0) ? (
                 <div className="p-8 text-center bg-base-bg border border-base-border rounded-md text-ink-muted">
-                  No EXIF or camera metadata headers embedded in this file artifact.
+                  No EXIF, XMP, or document metadata headers embedded in this file artifact.
                 </div>
               ) : (
-                <div className="space-y-4">
+                <>
+                  {docForensics && Object.keys(docForensics).length > 0 && (
+                    <div className="bg-base-bg border border-base-border rounded-md p-4 space-y-3">
+                      <span className="text-xs font-bold text-signal block uppercase">
+                        Document / PDF Metadata ({Object.keys(docForensics).length} fields)
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        {Object.entries(docForensics).map(([key, val]) => (
+                          <div key={key} className="py-1.5 border-b border-base-border/30">
+                            <span className="text-ink-muted block text-[10px] uppercase">
+                              {key.replace(/_/g, " ")}:
+                            </span>
+                            <span className="text-ink font-semibold break-all">
+                              {Array.isArray(val) ? val.join(", ") : String(val)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {exif.has_exif && (
+                    <div className="space-y-4">
                   <div className="bg-base-bg border border-base-border rounded-md p-4 space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-3 border-b border-base-border/50">
                       <div>
@@ -367,6 +389,8 @@ export default function FileIntelModule({ investigationId, onScanComplete }) {
                     )}
                   </div>
                 </div>
+                  )}
+                </>
               )}
             </div>
           )}

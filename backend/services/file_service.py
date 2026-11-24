@@ -11,7 +11,9 @@ import logging
 import mimetypes
 import struct
 import zipfile
+import zlib
 import re
+import xml.etree.ElementTree as ET
 from io import BytesIO
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -129,6 +131,41 @@ def _conv_num(val: Any) -> float:
     return float(val)
 
 
+def _make_serializable(val: Any) -> Any:
+    """
+    Recursively convert any Pillow-specific types (IFDRational, bytes, tuples)
+    into plain Python types that are JSON serializable.
+    This prevents 'Object of type IFDRational is not JSON serializable' errors.
+    """
+    # IFDRational: has numerator/denominator attributes like fractions
+    if hasattr(val, "numerator") and hasattr(val, "denominator"):
+        try:
+            denom = float(val.denominator)
+            return float(val.numerator) / denom if denom != 0 else float(val.numerator)
+        except Exception:
+            return str(val)
+    # Bytes → decode to string
+    if isinstance(val, bytes):
+        try:
+            return val.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            return str(val)
+    # Tuple → convert to list recursively (tuples are not JSON serializable either)
+    if isinstance(val, tuple):
+        return [_make_serializable(i) for i in val]
+    # List → recurse
+    if isinstance(val, list):
+        return [_make_serializable(i) for i in val]
+    # Dict → recurse over values
+    if isinstance(val, dict):
+        return {str(k): _make_serializable(v) for k, v in val.items()}
+    # Plain JSON-safe types
+    if isinstance(val, (str, int, float, bool)) or val is None:
+        return val
+    # Fallback: stringify anything else
+    return str(val)
+
+
 def _dms_to_decimal(dms: Any, ref: Optional[str]) -> Optional[float]:
     """Converts EXIF Degree/Minute/Second coordinates to decimal degrees."""
     try:
@@ -190,6 +227,79 @@ def parse_gps_data(gps_raw: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _parse_pdf_date(raw: str) -> str:
+    """Convert PDF date format (e.g. D:20261125005500+05'30') to readable ISO-like string."""
+    s = raw.strip()
+    m = re.match(
+        r"^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?([Z+-].*)?$",
+        s,
+    )
+    if not m:
+        return s
+    y, mo, d, h, mi, sec, tz = m.groups()
+    date_part = f"{y}-{mo or '01'}-{d or '01'}"
+    if h is not None:
+        time_part = f"{h}:{mi or '00'}:{sec or '00'}"
+        tz_clean = (tz or "").replace("'", ":").rstrip(":")
+        return f"{date_part} {time_part}{(' ' + tz_clean) if tz_clean else ''}".strip()
+    return date_part
+
+
+def _decode_pdf_bytes_value(raw: bytes) -> str:
+    """Decode PDF literal (...) or hex <...> string values, including UTF-16BE BOM."""
+    if raw.startswith(b"\xfe\xff"):
+        return raw[2:].decode("utf-16-be", errors="ignore").replace("\x00", "").strip()
+    if raw.startswith(b"\xff\xfe"):
+        return raw[2:].decode("utf-16-le", errors="ignore").replace("\x00", "").strip()
+    return raw.decode("utf-8", errors="ignore").strip()
+
+
+def _extract_xmp_metadata(raw_bytes: bytes) -> Dict[str, Any]:
+    """Extract key metadata fields from embedded XMP XML packets (images or PDFs)."""
+    xmp_data: Dict[str, Any] = {}
+    start = raw_bytes.find(b"<x:xmpmeta")
+    if start == -1:
+        start = raw_bytes.find(b"<rdf:RDF")
+    if start == -1:
+        return xmp_data
+
+    end = raw_bytes.find(b"</x:xmpmeta>", start)
+    if end != -1:
+        end += len(b"</x:xmpmeta>")
+    else:
+        end = raw_bytes.find(b"</rdf:RDF>", start)
+        if end != -1:
+            end += len(b"</rdf:RDF>")
+    if end == -1:
+        return xmp_data
+
+    xml_slice = raw_bytes[start:end]
+    try:
+        root = ET.fromstring(xml_slice)
+        interesting = {
+            "CreateDate", "ModifyDate", "MetadataDate", "DateCreated",
+            "DateTimeOriginal", "CreatorTool", "Producer", "Author",
+            "creator", "title", "description", "subject", "Keywords",
+            "DocumentID", "InstanceID", "Make", "Model", "Lens",
+            "GPSLatitude", "GPSLongitude",
+        }
+        for elem in root.iter():
+            tag_local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            # Attributes on rdf:Description
+            for attr_k, attr_v in elem.attrib.items():
+                attr_local = attr_k.split("}")[-1] if "}" in attr_k else attr_k
+                if attr_local in interesting and attr_v and attr_v.strip():
+                    xmp_data[f"XMP:{attr_local}"] = attr_v.strip()
+            # Element text or nested rdf:li text
+            if tag_local in interesting:
+                text_parts = [t.strip() for t in elem.itertext() if t and t.strip()]
+                if text_parts:
+                    xmp_data[f"XMP:{tag_local}"] = ", ".join(text_parts)
+    except Exception:
+        pass
+    return xmp_data
+
+
 def extract_document_and_binary_forensics(file_bytes: bytes, mime_type: str, filename: str) -> Dict[str, Any]:
     """
     Extracts forensic metadata from non-image files such as PDFs, ZIP archives, and executables.
@@ -200,17 +310,68 @@ def extract_document_and_binary_forensics(file_bytes: bytes, mime_type: str, fil
         # PDF Metadata inspection
         if mime_type == "application/pdf" or file_bytes.startswith(b"%PDF"):
             forensics["document_type"] = "PDF Document"
-            # Extract basic PDF header version
             header_match = re.search(rb"%PDF-(\d+\.\d+)", file_bytes[:1024])
             if header_match:
                 forensics["pdf_version"] = header_match.group(1).decode("ascii", errors="ignore")
 
-            # Extract standard metadata keys from PDF info stream
-            for key in [b"Title", b"Author", b"Creator", b"Producer", b"CreationDate", b"ModDate"]:
-                pattern = rb"/" + key + rb"\s*\(([^)]+)\)"
-                m = re.search(pattern, file_bytes)
-                if m:
-                    forensics[key.decode("ascii")] = m.group(1).decode("utf-8", errors="ignore").strip()
+            # Collect searchable buffers: raw bytes + decompressed FlateDecode streams
+            buffers = [file_bytes]
+            for stream_match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", file_bytes, re.DOTALL):
+                chunk = stream_match.group(1)
+                if len(chunk) > 2_000_000:
+                    continue
+                try:
+                    buffers.append(zlib.decompress(chunk))
+                except Exception:
+                    pass
+
+            combined = b"\n".join(buffers)
+
+            # Extract standard metadata keys (literal (...) or hex <...> strings)
+            pdf_keys = [b"Title", b"Author", b"Subject", b"Keywords", b"Creator", b"Producer", b"CreationDate", b"ModDate", b"Trapped"]
+            for key in pdf_keys:
+                key_name = key.decode("ascii")
+                # Literal string: /Key (value) handling escaped parens
+                lit_match = re.search(rb"/" + key + rb"\s*\(((?:\\.|[^\\)])*)\)", combined)
+                if lit_match:
+                    raw_val = lit_match.group(1).replace(rb"\(", b"(").replace(rb"\)", b")").replace(rb"\\", b"\\")
+                    val = _decode_pdf_bytes_value(raw_val)
+                    if val:
+                        forensics[key_name] = _parse_pdf_date(val) if "Date" in key_name else val
+                        continue
+                # Hex string: /Key <FEFF...>
+                hex_match = re.search(rb"/" + key + rb"\s*<([0-9A-Fa-f\s]+)>", combined)
+                if hex_match:
+                    try:
+                        hex_clean = re.sub(rb"\s+", b"", hex_match.group(1))
+                        raw_val = bytes.fromhex(hex_clean.decode("ascii"))
+                        val = _decode_pdf_bytes_value(raw_val)
+                        if val:
+                            forensics[key_name] = _parse_pdf_date(val) if "Date" in key_name else val
+                    except Exception:
+                        pass
+
+            # Extract XMP XML metadata if present in PDF
+            xmp_meta = _extract_xmp_metadata(combined)
+            for k, v in xmp_meta.items():
+                forensics[k] = v
+
+            # Structural & security indicators
+            pages = len(re.findall(rb"/Type\s*/Page\b", combined))
+            if pages > 0:
+                forensics["page_count"] = pages
+            forensics["encrypted"] = bool(re.search(rb"/Encrypt\b", combined))
+            risk_flags = []
+            if re.search(rb"/(?:JavaScript|JS)\b", combined):
+                risk_flags.append("JavaScript")
+            if re.search(rb"/OpenAction\b", combined):
+                risk_flags.append("OpenAction")
+            if re.search(rb"/Launch\b", combined):
+                risk_flags.append("LaunchAction")
+            if re.search(rb"/EmbeddedFile\b", combined):
+                risk_flags.append("EmbeddedFile")
+            if risk_flags:
+                forensics["active_content_flags"] = risk_flags
 
         # ZIP / Office document structure
         elif "zip" in mime_type or file_bytes.startswith(b"PK\x03\x04"):
@@ -270,16 +431,8 @@ def extract_exif_metadata(file_bytes: bytes, filename: str) -> Dict[str, Any]:
                     if tag_name == "GPSInfo" and isinstance(value, dict):
                         gps_raw.update(value)
 
-                    # Normalize bytes/rationals to serializable values
-                    if isinstance(value, bytes):
-                        try:
-                            value = value.decode("utf-8", errors="ignore").strip()
-                        except Exception:
-                            value = str(value)
-                    elif not isinstance(value, (str, int, float, bool, list, dict)) and value is not None:
-                        value = str(value)
-
-                    exif_dict[str(tag_name)] = value
+                    # Deep-convert any IFDRational / bytes / tuples to JSON-safe types
+                    exif_dict[str(tag_name)] = _make_serializable(value)
 
                 # Also inspect sub-IFD for GPSInfo (IFD 0x8825 / 34853)
                 try:
@@ -297,15 +450,7 @@ def extract_exif_metadata(file_bytes: bytes, filename: str) -> Dict[str, Any]:
                         for k, v in exif_sub.items():
                             sub_name = TAGS.get(k, str(k))
                             if str(sub_name) not in exif_dict:
-                                val_norm = v
-                                if isinstance(val_norm, bytes):
-                                    try:
-                                        val_norm = val_norm.decode("utf-8", errors="ignore").strip()
-                                    except Exception:
-                                        val_norm = str(val_norm)
-                                elif not isinstance(val_norm, (str, int, float, bool, list, dict)) and val_norm is not None:
-                                    val_norm = str(val_norm)
-                                exif_dict[str(sub_name)] = val_norm
+                                exif_dict[str(sub_name)] = _make_serializable(v)
                 except Exception:
                     pass
 
@@ -317,17 +462,31 @@ def extract_exif_metadata(file_bytes: bytes, filename: str) -> Dict[str, Any]:
                         tag_name = TAGS.get(tag, str(tag))
                         if tag_name == "GPSInfo" and isinstance(value, dict):
                             gps_raw.update(value)
-                        if isinstance(value, bytes):
-                            try:
-                                value = value.decode("utf-8", errors="ignore").strip()
-                            except Exception:
-                                value = str(value)
-                        elif not isinstance(value, (str, int, float, bool, list, dict)) and value is not None:
-                            value = str(value)
-                        exif_dict[str(tag_name)] = value
+                        exif_dict[str(tag_name)] = _make_serializable(value)
+
+            # Extract PNG / WebP / GIF info & text chunks (e.g. Creation Time, Software, XMP)
+            if getattr(img, "info", None):
+                for info_k, info_v in img.info.items():
+                    if info_k in ("icc_profile", "exif"):
+                        if info_k == "icc_profile":
+                            exif_dict["ICCProfile"] = f"Present ({len(info_v)} bytes)" if isinstance(info_v, (bytes, bytearray)) else "Present"
+                        continue
+                    if info_k == "XML:com.adobe.xmp" and isinstance(info_v, (str, bytes)):
+                        xmp_bytes = info_v.encode("utf-8", errors="ignore") if isinstance(info_v, str) else info_v
+                        exif_dict.update(_extract_xmp_metadata(xmp_bytes))
+                        continue
+                    if str(info_k) not in exif_dict:
+                        exif_dict[str(info_k)] = _make_serializable(info_v)
+
+            # Extract embedded XMP packet anywhere in image bytes (JPEG APP1, WebP, TIFF)
+            xmp_meta = _extract_xmp_metadata(file_bytes)
+            for k, v in xmp_meta.items():
+                if k not in exif_dict:
+                    exif_dict[k] = v
 
             result["exif"] = exif_dict
-            result["gps_raw"] = gps_raw
+            # Sanitize gps_raw too — IFDRational values may still be present in raw GPS dict
+            result["gps_raw"] = {str(k): _make_serializable(v) for k, v in gps_raw.items()}
 
     except Exception as e:
         logger.debug("Pillow failed to open image %s: %s", filename, e)
@@ -357,10 +516,23 @@ def analyze_file(db: Session, investigation_id: str, filename: str, file_bytes: 
 
     # Build standardized EXIF metadata structure expected by Frontend
     has_exif = bool(raw_exif and any(k not in ("error",) for k in raw_exif.keys()))
-    camera_make = raw_exif.get("Make")
-    camera_model = raw_exif.get("Model")
-    datetime_original = raw_exif.get("DateTimeOriginal") or raw_exif.get("DateTimeDigitized") or raw_exif.get("DateTime")
-    software = raw_exif.get("Software")
+    camera_make = raw_exif.get("Make") or raw_exif.get("XMP:Make")
+    camera_model = raw_exif.get("Model") or raw_exif.get("XMP:Model")
+    datetime_original = (
+        raw_exif.get("DateTimeOriginal")
+        or raw_exif.get("DateTimeDigitized")
+        or raw_exif.get("DateTime")
+        or raw_exif.get("XMP:DateTimeOriginal")
+        or raw_exif.get("XMP:CreateDate")
+        or raw_exif.get("XMP:DateCreated")
+        or raw_exif.get("Creation Time")
+        or raw_exif.get("date:create")
+    )
+    software = (
+        raw_exif.get("Software")
+        or raw_exif.get("XMP:CreatorTool")
+        or raw_exif.get("CreatorTool")
+    )
     gps_info = parse_gps_data(raw_gps) if raw_gps else None
 
     # If GPS info wasn't in raw_gps, check if it was parsed as string/dict in raw_exif
